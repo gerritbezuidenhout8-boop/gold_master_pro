@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../services/app_settings.dart';
 import '../../services/watchlist.dart';
 import '../../widgets/gmp_card.dart';
 
@@ -18,24 +21,49 @@ class MarketsScreen extends StatefulWidget {
 class _MarketsScreenState extends State<MarketsScreen> {
   List<InstrumentQuote>? _quotes;
   String? _error;
+  bool _loading = false;
+  Timer? _timer;
+
+  ValueNotifier<int> get _interval => AppSettings.instance.autoRefreshSeconds;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _interval.addListener(_restartTimer);
+    _restartTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _interval.removeListener(_restartTimer);
+    super.dispose();
+  }
+
+  void _restartTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(
+        Duration(seconds: _interval.value), (_) => _load());
   }
 
   Future<void> _load() async {
+    if (_loading) return; // skip overlapping refreshes
+    _loading = true;
     try {
       final quotes = await Watchlist.fetch();
       if (!mounted) return;
       setState(() {
         _quotes = quotes;
-        _error = quotes.isEmpty ? 'No market data available' : null;
+        _error = quotes.isEmpty && _quotes == null
+            ? 'No market data available'
+            : null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Could not load markets: $e');
+    } finally {
+      _loading = false;
     }
   }
 
@@ -89,10 +117,16 @@ class _MarketsScreenState extends State<MarketsScreen> {
           for (final q in quotes.where((q) => q.category == cat))
             _row(q),
         ],
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: Text('Live spot · gold-api.com · pull to refresh',
-              style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          child: ValueListenableBuilder<int>(
+            valueListenable: _interval,
+            builder: (context, seconds, _) => Text(
+              'Live spot · gold-api.com · auto-refresh every ${seconds}s',
+              style: const TextStyle(
+                  fontSize: 11, color: AppTheme.textSecondary),
+            ),
+          ),
         ),
       ],
     );

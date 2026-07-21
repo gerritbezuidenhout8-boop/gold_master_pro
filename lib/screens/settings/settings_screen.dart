@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../services/app_settings.dart';
 import '../../widgets/gmp_card.dart';
 
 /// App settings (spec: Settings). Layout matches the design; toggles are
@@ -44,13 +45,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
           _section('Data & Display', [
             _value('Data Source', 'Binance · gold-api'),
-            _value('Auto Refresh', '30 seconds'),
+            _autoRefreshRow(),
             _value('Chart Default', 'Candlestick'),
           ]),
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
-              'Preferences are illustrative in this build and take effect as '
+              'Auto Refresh is live on the Markets watchlist. Notification '
+              'toggles and other values are illustrative and take effect as '
               'each feature is connected.',
               style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
@@ -77,6 +79,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  Widget _autoRefreshRow() {
+    return ValueListenableBuilder<int>(
+      valueListenable: AppSettings.instance.autoRefreshSeconds,
+      builder: (context, seconds, _) => ListTile(
+        dense: true,
+        title: const Text('Auto Refresh',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('$seconds seconds',
+                style: const TextStyle(color: AppTheme.gold)),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right,
+                size: 18, color: AppTheme.textSecondary),
+          ],
+        ),
+        onTap: _pickAutoRefresh,
+      ),
+    );
+  }
+
+  Future<void> _pickAutoRefresh() async {
+    final chosen = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: SectionLabel('Auto Refresh Interval'),
+            ),
+            for (final s in AppSettings.autoRefreshOptions)
+              ListTile(
+                title: Text('$s seconds',
+                    style: const TextStyle(color: AppTheme.textPrimary)),
+                trailing: s == AppSettings.instance.autoRefreshSeconds.value
+                    ? const Icon(Icons.check, color: AppTheme.gold)
+                    : null,
+                onTap: () => Navigator.of(context).pop(s),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) await AppSettings.instance.setAutoRefresh(chosen);
   }
 
   Widget _value(String label, String value) {
