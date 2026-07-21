@@ -49,18 +49,18 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Gold Master Score'), findsOneWidget);
+    expect(find.text('GOLD MASTER SCORE'), findsOneWidget);
     expect(find.text('BULLISH'), findsOneWidget);
-    expect(find.text(' / 100'), findsOneWidget);
+    expect(find.text('/100'), findsOneWidget); // score gauge centre
     expect(fake.fetches, 2);
 
     await tester.scrollUntilVisible(
         find.textContaining('Gold trades at'), 300);
     expect(find.textContaining('Gold trades at'), findsOneWidget);
 
-    await tester.scrollUntilVisible(find.textContaining('H1 + '), 300);
-    expect(find.textContaining('fresh'), findsNothing); // synthetic = stale
-    expect(find.textContaining('stale'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('candles'), 300);
+    // Synthetic fixtures are old, so the feed reads as delayed.
+    expect(find.textContaining('delayed'), findsOneWidget);
 
     await tester.scrollUntilVisible(find.text('Analyze Gold'), 300);
     await tester.tap(find.text('Analyze Gold'));

@@ -8,6 +8,7 @@ import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/services/alert_store.dart';
 import 'package:gold_master_pro/services/market_data.dart';
+import 'package:gold_master_pro/services/watchlist.dart';
 import 'package:gold_master_pro/state/alerts_controller.dart';
 
 class _FakeMarketData implements MarketData {
@@ -37,6 +38,7 @@ class _FakeMarketData implements MarketData {
 void main() {
   late MarketData realMarketData;
   late AlertsController realAlerts;
+  late WatchlistFetcher realWatchlist;
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -46,11 +48,15 @@ void main() {
     // controller over an empty store so tests don't share state.
     realAlerts = AlertsController.instance;
     AlertsController.instance = AlertsController(store: LocalAlertStore());
+    // Markets tab loads a watchlist at boot; avoid real network in tests.
+    realWatchlist = Watchlist.fetch;
+    Watchlist.fetch = () async => const [];
   });
 
   tearDown(() {
     MarketData.instance = realMarketData;
     AlertsController.instance = realAlerts;
+    Watchlist.fetch = realWatchlist;
   });
 
   testWidgets('boots to Home with six destinations', (tester) async {
@@ -66,7 +72,7 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget);
     }
-    expect(find.text('Gold Master Pro'), findsOneWidget);
+    expect(find.text('GOLD MASTER PRO'), findsOneWidget); // header wordmark
     // Chart screen is offstage inside the IndexedStack until selected.
     expect(find.text('M15'), findsNothing);
 

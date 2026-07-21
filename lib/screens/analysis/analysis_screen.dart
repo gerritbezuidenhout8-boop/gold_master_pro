@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../ai/gold_master_engine.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../indicators/candlestick_ai.dart';
 import '../../indicators/fibonacci.dart';
 import '../../indicators/key_levels.dart';
 import '../../indicators/smma.dart';
 import '../../services/market_data.dart';
-import '../../widgets/section_card.dart';
-import '../../widgets/section_placeholder.dart';
+import '../../widgets/gmp_card.dart';
+import '../../widgets/section_card.dart' show KvRow;
 
-/// Deep-dive analysis view (spec: Analysis Screen): real key levels,
-/// auto-Fibonacci, SMMA read-out and candlestick detections computed
-/// from live candles (D1 for levels, H1 for everything else).
+/// Deep-dive analysis view (spec: Analysis Screen): trend, key levels,
+/// an indicator summary from the engine's real signals, auto-Fibonacci,
+/// SMMA read-out and candlestick detections — all from live candles.
 class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
 
@@ -20,6 +22,7 @@ class AnalysisScreen extends StatefulWidget {
 }
 
 class _AnalysisScreenState extends State<AnalysisScreen> {
+  GoldMasterAnalysis? _analysis;
   KeyLevelsResult? _levels;
   AutoFibResult? _fib;
   List<(DateTime, CandlePattern)> _patterns = const [];
@@ -55,6 +58,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       }
 
       setState(() {
+        _analysis = GoldMasterEngine.analyze(h1: h1, d1: daily);
         _levels = KeyLevels.compute(daily);
         _fib = h1.isEmpty ? null : Fibonacci.auto(h1);
         _patterns = found.reversed.take(6).toList();
@@ -75,138 +79,243 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     }
   }
 
+  Color _biasColor(MarketBias b) => switch (b) {
+        MarketBias.bullish => AppTheme.bull,
+        MarketBias.bearish => AppTheme.bear,
+        MarketBias.neutral => AppTheme.textSecondary,
+      };
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Analysis'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: AppTheme.gold),
             tooltip: 'Recompute',
             onPressed: _loading ? null : _refresh,
           ),
         ],
       ),
-      body: _buildBody(theme),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildBody(ThemeData theme) {
+  Widget _buildBody() {
     final error = _error;
     if (error != null) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(error, style: theme.textTheme.bodySmall),
-            TextButton(onPressed: _refresh, child: const Text('Retry')),
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(error, style: const TextStyle(color: AppTheme.textSecondary)),
+          TextButton(onPressed: _refresh, child: const Text('Retry')),
+        ]),
       );
     }
     final levels = _levels;
-    if (levels == null) {
+    final a = _analysis;
+    if (levels == null || a == null) {
       return const Center(child: CircularProgressIndicator());
     }
     final fib = _fib;
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.only(top: 8, bottom: 24),
       children: [
         if (_computedAt != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
             child: Text(
-              'Computed ${formatUtcStamp(_computedAt!)} UTC · D1 + H1 · PAXG data',
+              'Computed ${formatUtcStamp(_computedAt!)} UTC · D1 + H1 · PAXG',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
+              style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
           ),
-        SectionCard(
-          title: 'Key Levels (UTC days)',
-          children: [
-            KvRow(label: 'Daily Open', value: formatPrice(levels.dailyOpen)),
-            KvRow(label: 'Daily High', value: formatPrice(levels.dailyHigh)),
-            KvRow(label: 'Daily Low', value: formatPrice(levels.dailyLow)),
-            KvRow(label: 'Prev Day High', value: _fmtOpt(levels.prevDayHigh)),
-            KvRow(label: 'Prev Day Low', value: _fmtOpt(levels.prevDayLow)),
-            KvRow(label: 'Week High', value: formatPrice(levels.weekHigh)),
-            KvRow(label: 'Week Low', value: formatPrice(levels.weekLow)),
-            KvRow(
-                label: 'Prev Week High',
-                value: _fmtOpt(levels.prevWeekHigh)),
-            KvRow(label: 'Prev Week Low', value: _fmtOpt(levels.prevWeekLow)),
-            KvRow(
-                label: 'All-Time High*',
-                value: formatPrice(levels.allTimeHigh)),
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                '*highest within the loaded 500-day history',
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
-          ],
-        ),
-        if (fib != null)
-          SectionCard(
-            title: 'Auto Fibonacci · H1',
-            children: [
-              Text(
-                '${fib.isUpLeg ? 'Up' : 'Down'} leg · '
-                '${formatPrice(fib.swingLow)} → ${formatPrice(fib.swingHigh)}',
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 4),
-              for (final r in Fibonacci.ratios)
-                KvRow(
-                  label: _ratioLabel(r),
-                  value: formatPrice(fib.levels[r]!),
-                  highlight: r == _nearestRatio(fib),
-                ),
-              if (_nearestRatio(fib) != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Price is nearest the ${_ratioLabel(_nearestRatio(fib)!)} level',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-            ],
-          ),
-        SectionCard(
-          title: 'Moving Averages · H1',
-          children: [
-            KvRow(label: 'SMMA 21', value: _smmaText(_smma21)),
-            KvRow(label: 'SMMA 50', value: _smmaText(_smma50)),
-            KvRow(label: 'SMMA 200', value: _smmaText(_smma200)),
-          ],
-        ),
-        SectionCard(
-          title: 'Candlestick Detection · H1 · last 20 candles',
-          children: [
-            if (_patterns.isEmpty)
-              Text('No patterns detected', style: theme.textTheme.bodySmall)
-            else
-              for (final (t, p) in _patterns) _patternRow(theme, t, p),
-          ],
-        ),
-        const SectionPlaceholder(
-          title: 'Indicator summary & risk analysis',
-          subtitle: 'Gold Master Score rubric — see Home',
-          icon: Icons.summarize,
-        ),
-        const SectionPlaceholder(
-          title: 'Best / worst scenario',
-          subtitle: 'Narrative engine — Phase 4+',
-          icon: Icons.alt_route,
-        ),
+        _trendCard(a),
+        _keyLevelsCard(levels),
+        _indicatorSummaryCard(a),
+        if (fib != null) _fibCard(fib),
+        _smmaCard(),
+        _patternsCard(),
       ],
     );
   }
 
-  String _fmtOpt(double? v) => v == null ? '—' : formatPrice(v);
+  Widget _trendCard(GoldMasterAnalysis a) {
+    final color = _biasColor(a.bias);
+    final strength =
+        a.clarity >= 50 ? 'Strong' : a.clarity >= 25 ? 'Moderate' : 'Weak';
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Trend Analysis'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Primary trend',
+                        style: TextStyle(
+                            fontSize: 11, color: AppTheme.textSecondary)),
+                    const SizedBox(height: 2),
+                    Text(a.bias.label,
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: color)),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Text('Strength',
+                      style: TextStyle(
+                          fontSize: 11, color: AppTheme.textSecondary)),
+                  const SizedBox(height: 2),
+                  Text('$strength · ${a.clarity}%',
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _keyLevelsCard(KeyLevelsResult l) {
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Key Levels (UTC days)'),
+          const SizedBox(height: 10),
+          KvRow(label: 'Daily Open', value: formatPrice(l.dailyOpen)),
+          KvRow(label: 'Daily High', value: formatPrice(l.dailyHigh)),
+          KvRow(label: 'Daily Low', value: formatPrice(l.dailyLow)),
+          KvRow(label: 'Prev Day High', value: _opt(l.prevDayHigh)),
+          KvRow(label: 'Prev Day Low', value: _opt(l.prevDayLow)),
+          KvRow(label: 'Week High', value: formatPrice(l.weekHigh)),
+          KvRow(label: 'Week Low', value: formatPrice(l.weekLow)),
+          KvRow(label: 'Prev Week High', value: _opt(l.prevWeekHigh)),
+          KvRow(label: 'Prev Week Low', value: _opt(l.prevWeekLow)),
+          KvRow(label: 'All-Time High*', value: formatPrice(l.allTimeHigh)),
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text('*highest within the loaded 500-day history',
+                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _indicatorSummaryCard(GoldMasterAnalysis a) {
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Indicator Summary'),
+          const SizedBox(height: 10),
+          for (final c in a.components)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(c.name,
+                        style: const TextStyle(color: AppTheme.textPrimary)),
+                  ),
+                  _signalPill(c.signal),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _signalPill(double signal) {
+    final (text, color) = signal > 0.15
+        ? ('Bullish', AppTheme.bull)
+        : signal < -0.15
+            ? ('Bearish', AppTheme.bear)
+            : ('Neutral', AppTheme.gold);
+    return GmpPill(text: text, color: color);
+  }
+
+  Widget _fibCard(AutoFibResult fib) {
+    final nearest = _nearestRatio(fib);
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Auto Fibonacci · H1'),
+          const SizedBox(height: 8),
+          Text(
+            '${fib.isUpLeg ? 'Up' : 'Down'} leg · '
+            '${formatPrice(fib.swingLow)} → ${formatPrice(fib.swingHigh)}',
+            style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 4),
+          for (final r in Fibonacci.ratios)
+            KvRow(
+              label: _ratioLabel(r),
+              value: formatPrice(fib.levels[r]!),
+              highlight: r == nearest,
+            ),
+          if (nearest != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('Price is nearest the ${_ratioLabel(nearest)} level',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppTheme.textSecondary)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _smmaCard() {
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Moving Averages · H1'),
+          const SizedBox(height: 8),
+          KvRow(label: 'SMMA 21', value: _smmaText(_smma21)),
+          KvRow(label: 'SMMA 50', value: _smmaText(_smma50)),
+          KvRow(label: 'SMMA 200', value: _smmaText(_smma200)),
+        ],
+      ),
+    );
+  }
+
+  Widget _patternsCard() {
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Candlestick Detection · H1'),
+          const SizedBox(height: 8),
+          if (_patterns.isEmpty)
+            const Text('No patterns detected',
+                style: TextStyle(color: AppTheme.textSecondary))
+          else
+            for (final (t, p) in _patterns) _patternRow(t, p),
+        ],
+      ),
+    );
+  }
+
+  String _opt(double? v) => v == null ? '—' : formatPrice(v);
 
   String _smmaText(double? v) {
     if (v == null) return '—';
@@ -234,20 +343,20 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     return best;
   }
 
-  Widget _patternRow(ThemeData theme, DateTime t, CandlePattern p) {
+  Widget _patternRow(DateTime t, CandlePattern p) {
     final color = p.isBullishSignal
-        ? const Color(0xFF14AD8F)
+        ? AppTheme.bull
         : p.isBearishSignal
-            ? const Color(0xFFD5405D)
-            : theme.colorScheme.onSurface;
+            ? AppTheme.bear
+            : AppTheme.textPrimary;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text('${formatUtcStamp(t)} UTC', style: theme.textTheme.bodySmall),
-          Text(p.label,
-              style: theme.textTheme.bodyMedium?.copyWith(color: color)),
+          Text('${formatUtcStamp(t)} UTC',
+              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          Text(p.label, style: TextStyle(color: color)),
         ],
       ),
     );

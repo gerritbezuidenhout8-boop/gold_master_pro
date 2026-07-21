@@ -80,20 +80,25 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Key Levels (UTC days)'), findsOneWidget);
-    expect(find.text('200.00'), findsOneWidget); // ATH from the D1 spike
+    // Section labels are uppercased; cards are virtualized so scroll to each.
+    expect(find.text('TREND ANALYSIS'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+        find.text('KEY LEVELS (UTC DAYS)'), 250);
     expect(find.text('Prev Week High'), findsOneWidget);
     expect(find.text('119.00'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('200.00'), 250); // ATH spike
 
-    expect(find.text('Auto Fibonacci · H1'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('INDICATOR SUMMARY'), 250);
+    expect(find.text('AUTO FIBONACCI · H1'), findsNothing); // not yet reached
+
+    await tester.scrollUntilVisible(find.text('AUTO FIBONACCI · H1'), 250);
     expect(find.text('61.8%'), findsOneWidget);
 
-    // Cards further down are virtualized out of the ListView — scroll.
-    await tester.scrollUntilVisible(find.text('Moving Averages · H1'), 300);
-    expect(find.text('Moving Averages · H1'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('MOVING AVERAGES · H1'), 250);
     expect(find.textContaining('price'), findsWidgets); // above/below note
 
-    await tester.scrollUntilVisible(find.text('Bullish Engulfing').first, 300);
+    await tester.scrollUntilVisible(find.text('Bullish Engulfing').first, 250);
     expect(find.text('Bullish Engulfing'), findsWidgets);
   });
 

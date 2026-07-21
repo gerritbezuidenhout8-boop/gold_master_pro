@@ -37,7 +37,7 @@ void main() {
 
   testWidgets('empty state and live-watch card', (tester) async {
     await pump(tester);
-    expect(find.text('Live watch'), findsOneWidget);
+    expect(find.text('LIVE WATCH'), findsOneWidget);
     expect(find.textContaining('No alerts yet'), findsOneWidget);
     expect(find.text('waiting for feed…'), findsOneWidget);
   });

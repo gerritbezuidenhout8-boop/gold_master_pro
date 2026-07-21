@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
 import '../../models/alert_rule.dart';
 import '../../state/alerts_controller.dart';
-import '../../widgets/section_card.dart';
-
-const _armed = Color(0xFF14AD8F);
-const _fired = Color(0xFFD4AF37);
+import '../../widgets/gmp_card.dart';
+import '../../widgets/gold_button.dart';
 
 /// Price alerts (spec: Alerts tab). In-app alerts are evaluated live
 /// while the app is open (see AlertWatcher). Background delivery needs
@@ -31,6 +30,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final result = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: AppTheme.surface,
       builder: (_) => _AlertSheet(existing: existing, seed: _c.lastPrice),
     );
     if (result is AlertRule) {
@@ -42,103 +42,161 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Alerts')),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const ValueKey('add-alert'),
-        onPressed: () => _openSheet(),
-        icon: const Icon(Icons.add),
-        label: const Text('New alert'),
-      ),
-      body: ListenableBuilder(
-        listenable: _c,
-        builder: (context, _) {
-          final rules = _c.rules;
-          return ListView(
-            padding: const EdgeInsets.only(top: 8, bottom: 96),
-            children: [
-              SectionCard(title: 'Live watch', children: [
-                KvRow(
-                  label: 'Last price',
-                  value: _c.lastPrice == null
-                      ? 'waiting for feed…'
-                      : formatPrice(_c.lastPrice!),
-                ),
-                KvRow(
-                  label: 'Armed alerts',
-                  value: '${rules.where((r) => r.isArmed).length} '
-                      'of ${rules.length}',
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    'Alerts fire while the app is open. Background push needs '
-                    'the optional backend (docs/alerts_backend.md).',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-              ]),
-              if (rules.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'No alerts yet — tap “New alert” to watch a price level.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                )
-              else
-                for (final r in rules) _alertCard(r, theme),
-            ],
-          );
-        },
+      body: Column(
+        children: [
+          Expanded(
+            child: ListenableBuilder(
+              listenable: _c,
+              builder: (context, _) {
+                final rules = _c.rules;
+                return ListView(
+                  padding: const EdgeInsets.only(top: 8, bottom: 16),
+                  children: [
+                    _liveWatch(rules),
+                    if (rules.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Text(
+                          'No alerts yet — add one to watch a price level.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppTheme.textSecondary),
+                        ),
+                      )
+                    else
+                      for (final r in rules) _alertCard(r),
+                  ],
+                );
+              },
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+              child: GoldButton(
+                key: const ValueKey('add-alert'),
+                label: 'New Alert',
+                icon: Icons.add,
+                onPressed: () => _openSheet(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _alertCard(AlertRule r, ThemeData theme) {
-    final triggered = r.triggeredAt != null;
-    final color = !r.enabled
-        ? theme.colorScheme.outline
-        : triggered
-            ? _fired
-            : _armed;
-    final status = !r.enabled
-        ? 'DISABLED'
-        : triggered
-            ? 'FIRED ${formatUtcStamp(r.triggeredAt!)} UTC'
-            : 'ARMED';
-    return Card(
-      child: ListTile(
-        onTap: () => _openSheet(existing: r),
-        leading: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            r.kind.shortLabel,
-            style: theme.textTheme.labelSmall
-                ?.copyWith(color: color, fontWeight: FontWeight.w600),
-          ),
-        ),
-        title: Text('Gold ${r.kind.label} ${formatPrice(r.threshold)}'),
-        subtitle: Text(
-          '$status${r.note.isEmpty ? '' : ' · ${r.note}'}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: triggered
-            ? TextButton(
-                onPressed: () => _c.rearm(r.id),
-                child: const Text('Re-arm'),
-              )
-            : Switch(
-                value: r.enabled,
-                onChanged: (v) => _c.setEnabled(r.id, v),
+  Widget _liveWatch(List<AlertRule> rules) {
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Live watch'),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Last price',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+              Text(
+                _c.lastPrice == null
+                    ? 'waiting for feed…'
+                    : formatPrice(_c.lastPrice!),
+                style: const TextStyle(
+                    color: AppTheme.textPrimary, fontWeight: FontWeight.w600),
               ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Armed alerts',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+              Text('${rules.where((r) => r.isArmed).length} of ${rules.length}',
+                  style: const TextStyle(color: AppTheme.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Alerts fire while the app is open. Background push needs the '
+            'optional backend (docs/alerts_backend.md).',
+            style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _alertCard(AlertRule r) {
+    final triggered = r.triggeredAt != null;
+    final (statusText, statusColor) = !r.enabled
+        ? ('Off', AppTheme.textSecondary)
+        : triggered
+            ? ('Fired', AppTheme.gold)
+            : ('Armed', AppTheme.bull);
+    final dirColor =
+        r.kind == AlertKind.priceAbove ? AppTheme.bull : AppTheme.bear;
+    return GmpCard(
+      margin: const EdgeInsets.fromLTRB(14, 5, 14, 5),
+      onTap: () => _openSheet(existing: r),
+      child: Row(
+        children: [
+          Icon(
+            r.kind == AlertKind.priceAbove
+                ? Icons.trending_up
+                : Icons.trending_down,
+            color: dirColor,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Gold ${r.kind.label} ${formatPrice(r.threshold)}',
+                    style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Row(children: [
+                  GmpPill(text: statusText, color: statusColor),
+                  if (triggered)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: Text('${formatUtcStamp(r.triggeredAt!)} UTC',
+                          style: const TextStyle(
+                              fontSize: 11, color: AppTheme.textSecondary)),
+                    ),
+                  if (r.note.isNotEmpty && !triggered)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text(r.note,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textSecondary)),
+                      ),
+                    ),
+                ]),
+              ],
+            ),
+          ),
+          triggered
+              ? TextButton(
+                  onPressed: () => _c.rearm(r.id),
+                  child: const Text('Re-arm',
+                      style: TextStyle(color: AppTheme.gold)),
+                )
+              : Switch(
+                  value: r.enabled,
+                  activeThumbColor: AppTheme.gold,
+                  onChanged: (v) => _c.setEnabled(r.id, v),
+                ),
+        ],
       ),
     );
   }
@@ -185,7 +243,6 @@ class _AlertSheetState extends State<_AlertSheet> {
       note: _note.text.trim(),
       enabled: base?.enabled ?? true,
       createdAt: base?.createdAt ?? DateTime.now().toUtc(),
-      // Editing re-arms so the new level is watched afresh.
       triggeredAt: null,
     ));
   }
@@ -242,7 +299,7 @@ class _AlertSheetState extends State<_AlertSheet> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(_error!,
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: const Color(0xFFD5405D))),
+                          ?.copyWith(color: AppTheme.bear)),
                 ),
               const SizedBox(height: 16),
               Row(children: [
@@ -251,7 +308,7 @@ class _AlertSheetState extends State<_AlertSheet> {
                     key: const ValueKey('delete-alert-button'),
                     onPressed: () => Navigator.of(context).pop('delete'),
                     child: const Text('Delete',
-                        style: TextStyle(color: Color(0xFFD5405D))),
+                        style: TextStyle(color: AppTheme.bear)),
                   ),
                 const Spacer(),
                 FilledButton(

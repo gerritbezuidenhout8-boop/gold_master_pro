@@ -79,8 +79,8 @@ class GmpChart extends StatelessWidget {
   }
 
   static const KChartColors _colors = KChartColors(
-    bgColor: AppTheme.surfaceDark,
-    selectFillColor: AppTheme.surfaceRaised,
+    bgColor: AppTheme.background,
+    selectFillColor: AppTheme.surfaceAlt,
     selectBorderColor: Color(0xFF4A4436),
     gridColor: Color(0xFF262119),
     defaultTextColor: Color(0xFF8F8A7E),
@@ -124,7 +124,7 @@ class GmpChart extends StatelessWidget {
       width: 180,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceRaised,
+        color: AppTheme.surfaceAlt,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: const Color(0xFF4A4436), width: 0.5),
       ),
