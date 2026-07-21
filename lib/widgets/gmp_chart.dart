@@ -4,6 +4,8 @@ import 'package:k_chart_plus/k_chart_plus.dart';
 import '../core/theme/app_theme.dart';
 import '../indicators/smma.dart';
 import '../models/candle.dart';
+import 'indicators/rsi_divergence_indicator.dart';
+import 'indicators/stoch_rsi_indicator.dart';
 
 /// GMP's SMMA 21/50/200 rendered by the chart engine.
 ///
@@ -54,15 +56,39 @@ class SmmaIndicator extends MAIndicator {
 
 /// Candlestick chart themed for GMP, fed with app-model candles.
 class GmpChart extends StatelessWidget {
-  const GmpChart({super.key, required this.datas, required this.intraday});
+  const GmpChart({
+    super.key,
+    required this.datas,
+    required this.intraday,
+    this.showStochRsi = true,
+    this.showDivergence = true,
+  });
 
   final List<KLineEntity> datas;
   final bool intraday;
+  final bool showStochRsi;
+  final bool showDivergence;
 
-  static final List<MainIndicator> mainIndicators = [SmmaIndicator()];
+  // Indicator instances are shared between prepare() (which runs calc) and
+  // the widget (which draws) — they must be the SAME objects because the
+  // custom indicators cache computed values in an Expando keyed by entity.
+  static final SmmaIndicator _smma = SmmaIndicator();
+  static final StochRsiIndicator _stochRsi = StochRsiIndicator();
+  static final RsiDivergenceIndicator _divergence = RsiDivergenceIndicator();
+
+  static List<MainIndicator> _mainIndicators(bool divergence) =>
+      [_smma, if (divergence) _divergence];
+
+  static List<SecondaryIndicator> _secondaryIndicators(bool stochRsi) =>
+      [if (stochRsi) _stochRsi];
 
   /// Converts app candles to chart entities and pre-computes overlays.
-  static List<KLineEntity> prepare(List<Candle> candles) {
+  /// Must be given the same toggle values the widget renders with.
+  static List<KLineEntity> prepare(
+    List<Candle> candles, {
+    bool stochRsi = true,
+    bool divergence = true,
+  }) {
     final datas = [
       for (final c in candles)
         KLineEntity.fromCustom(
@@ -74,7 +100,8 @@ class GmpChart extends StatelessWidget {
           vol: c.volume,
         ),
     ];
-    DataUtil.calculateAll(datas, mainIndicators, const []);
+    DataUtil.calculateAll(
+        datas, _mainIndicators(divergence), _secondaryIndicators(stochRsi));
     return datas;
   }
 
@@ -93,19 +120,22 @@ class GmpChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
-      const volHeight = 70.0;
-      final base =
-          (constraints.maxHeight - volHeight - 70).clamp(220, 1400).toDouble();
+      const paneHeight = 66.0;
+      final panes = 1 + (showStochRsi ? 1 : 0); // volume + optional StochRSI
+      final base = (constraints.maxHeight - paneHeight * panes - 56)
+          .clamp(180, 1400)
+          .toDouble();
       return KChartWidget(
         datas,
         const KChartStyle(),
         _colors,
         isTrendLine: false,
-        mainIndicators: mainIndicators,
+        mainIndicators: _mainIndicators(showDivergence),
+        secondaryIndicators: _secondaryIndicators(showStochRsi),
         volHidden: false,
         fixedLength: 2,
         mBaseHeight: base,
-        mSecondaryHeight: volHeight,
+        mSecondaryHeight: paneHeight,
         timeFormat: intraday
             ? TimeFormat.YEAR_MONTH_DAY_WITH_HOUR
             : TimeFormat.YEAR_MONTH_DAY,

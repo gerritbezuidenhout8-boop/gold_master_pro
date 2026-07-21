@@ -6,6 +6,7 @@ import '../../core/utils/format.dart';
 import '../../indicators/candlestick_ai.dart';
 import '../../indicators/fibonacci.dart';
 import '../../indicators/key_levels.dart';
+import '../../indicators/rsi.dart';
 import '../../indicators/smma.dart';
 import '../../services/market_data.dart';
 import '../../widgets/gmp_card.dart';
@@ -28,6 +29,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   List<(DateTime, CandlePattern)> _patterns = const [];
   double? _lastClose;
   double? _smma21, _smma50, _smma200;
+  double? _rsi, _stochK, _stochD;
+  DivergenceEvent? _recentDiv;
   DateTime? _computedAt;
   String? _error;
   bool _loading = true;
@@ -67,6 +70,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         _smma50 = closes.length >= 50 ? Smma.compute(closes, 50).last : null;
         _smma200 =
             closes.length >= 200 ? Smma.compute(closes, 200).last : null;
+        _rsi = _lastNonNull(Rsi.compute(closes));
+        final sr = StochRsi.compute(closes);
+        _stochK = _lastNonNull(sr.k);
+        _stochD = _lastNonNull(sr.d);
+        final divs = RsiDivergence.detect(h1);
+        _recentDiv = divs.isNotEmpty && divs.last.index >= h1.length - 10
+            ? divs.last
+            : null;
         _computedAt = DateTime.now().toUtc();
         _loading = false;
       });
@@ -133,6 +144,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         _trendCard(a),
         _keyLevelsCard(levels),
         _indicatorSummaryCard(a),
+        _momentumCard(),
         if (fib != null) _fibCard(fib),
         _smmaCard(),
         _patternsCard(),
@@ -249,6 +261,79 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             ? ('Bearish', AppTheme.bear)
             : ('Neutral', AppTheme.gold);
     return GmpPill(text: text, color: color);
+  }
+
+  Widget _momentumCard() {
+    final rsi = _rsi;
+    final k = _stochK;
+    final d = _stochD;
+    (String, Color) rsiTag = rsi == null
+        ? ('—', AppTheme.textSecondary)
+        : rsi >= 70
+            ? ('Overbought', AppTheme.bear)
+            : rsi <= 30
+                ? ('Oversold', AppTheme.bull)
+                : rsi >= 50
+                    ? ('Bullish', AppTheme.bull)
+                    : ('Bearish', AppTheme.bear);
+    final stochBull = (k != null && d != null) ? k >= d : null;
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Momentum · H1'),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('RSI (14)  ${rsi?.toStringAsFixed(1) ?? '—'}',
+                  style: const TextStyle(color: AppTheme.textPrimary)),
+              GmpPill(text: rsiTag.$1, color: rsiTag.$2),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Stoch RSI  %K ${k?.toStringAsFixed(1) ?? '—'} · '
+                '%D ${d?.toStringAsFixed(1) ?? '—'}',
+                style: const TextStyle(color: AppTheme.textPrimary),
+              ),
+              if (stochBull != null)
+                GmpPill(
+                    text: stochBull ? 'Bullish' : 'Bearish',
+                    color: stochBull ? AppTheme.bull : AppTheme.bear),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('RSI Divergence',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              _recentDiv == null
+                  ? const Text('none',
+                      style: TextStyle(color: AppTheme.textSecondary))
+                  : GmpPill(
+                      text: _recentDiv!.type == DivergenceType.bullish
+                          ? 'Bullish'
+                          : 'Bearish',
+                      color: _recentDiv!.type == DivergenceType.bullish
+                          ? AppTheme.bull
+                          : AppTheme.bear),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  double? _lastNonNull(List<double?> xs) {
+    for (var i = xs.length - 1; i >= 0; i--) {
+      if (xs[i] != null) return xs[i];
+    }
+    return null;
   }
 
   Widget _fibCard(AutoFibResult fib) {

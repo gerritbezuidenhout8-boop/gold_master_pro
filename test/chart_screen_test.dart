@@ -50,6 +50,8 @@ void main() {
     expect(requested, ['H1', 'M5']);
     expect(find.text('XAUUSD · M5'), findsOneWidget);
     expect(find.byType(KChartWidget), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox()); // dispose throttle timer
   });
 
   testWidgets('applies live candle updates to the chart', (tester) async {
@@ -72,6 +74,9 @@ void main() {
       close: 200.5,
       volume: 1,
     ));
+    await tester.pump(); // deliver stream event (marks dirty)
+    // Updates are throttled — advance past the 1s coalescing window.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     expect(tester.widget<GmpChart>(find.byType(GmpChart)).datas, hasLength(61));
 
@@ -99,5 +104,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.byType(KChartWidget), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox()); // dispose throttle timer
   });
 }
