@@ -1,0 +1,12 @@
+# Normalize text to LF in the repo (keeps Linux CI and Windows dev consistent).
+* text=auto eol=lf
+
+# Binary assets — never touch line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.keystore binary
+*.jks binary
