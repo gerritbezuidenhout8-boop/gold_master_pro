@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for live market data (Binance feed, gold-api). Without
+         this the release build has no network access. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="gold_master_pro"
+        android:label="Gold Master Pro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
