@@ -41,7 +41,7 @@ class GmpWordmark extends StatelessWidget {
   }
 }
 
-/// Circular emblem placeholder (bull silhouette) for splash / avatars.
+/// The crowned-bull emblem (rounded square) for drawer / avatars.
 class GmpEmblem extends StatelessWidget {
   const GmpEmblem({super.key, this.size = 120});
 
@@ -49,18 +49,14 @@ class GmpEmblem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const RadialGradient(
-          colors: [Color(0xFF2A2413), Color(0xFF0A0A0B)],
-        ),
-        border: Border.all(color: AppTheme.gold, width: 2),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.22),
+      child: Image.asset(
+        'assets/branding/icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
       ),
-      child: Icon(Icons.savings_outlined,
-          color: AppTheme.gold, size: size * 0.5),
     );
   }
 }
