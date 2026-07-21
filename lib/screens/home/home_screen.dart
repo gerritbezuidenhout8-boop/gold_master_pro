@@ -80,7 +80,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       drawer: const _HomeDrawer(),
       appBar: AppBar(
-        title: const GmpWordmark(),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            GmpEmblem(size: 30),
+            SizedBox(width: 8),
+            Text(
+              'GOLD MASTER PRO',
+              style: TextStyle(
+                fontSize: 13,
+                letterSpacing: 1.6,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.gold,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_none),
