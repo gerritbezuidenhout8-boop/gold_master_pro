@@ -90,7 +90,7 @@ void main() {
 
     expect(find.text('M15'), findsOneWidget);
     expect(find.text('XAUUSD · H1'), findsOneWidget);
-    expect(find.textContaining('PAXG'), findsOneWidget);
+    expect(find.textContaining('Candles:'), findsOneWidget);
     expect(find.byType(KChartWidget), findsOneWidget);
 
     // Dispose the tree so subscriptions and timers shut down.

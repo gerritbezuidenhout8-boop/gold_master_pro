@@ -156,8 +156,8 @@ class _LivePriceCardState extends State<LivePriceCard> {
             live == null && _xau != null
                 ? 'XAU spot · gold-api.com'
                 : live == null
-                    ? 'PAXG/USD · Binance'
-                    : 'PAXG/USD · Binance · live · '
+                    ? 'connecting…'
+                    : '${live.source} · '
                         '${two(live.time.hour)}:${two(live.time.minute)}:${two(live.time.second)} UTC',
             style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary),
           ),

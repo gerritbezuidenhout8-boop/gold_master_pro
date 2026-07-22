@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../indicators/rsi.dart';
 import '../../models/candle.dart';
 import '../../services/market_data.dart';
+import '../../services/spot_gold_data.dart';
 import '../../widgets/gmp_card.dart';
 import '../../widgets/gmp_chart.dart';
 
@@ -145,12 +146,16 @@ class _ChartScreenState extends State<ChartScreen> {
           ),
           _momentumBar(),
           Expanded(child: _buildChartArea()),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 2, 12, 6),
-            child: Text(
-              'Candles: PAXG/USD (tracks gold) · Binance public data · live',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+            child: ValueListenableBuilder<String>(
+              valueListenable: SpotGoldMarketData.candleSource,
+              builder: (context, source, _) => Text(
+                'Candles: $source · live',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 11, color: AppTheme.textSecondary),
+              ),
             ),
           ),
         ],
