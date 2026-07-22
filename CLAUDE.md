@@ -64,7 +64,11 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   components → score 0-100, bias at 60/40, confidence, clarity, template
   narrative). No Flutter imports, no network. Any future LLM layer
   narrates computed numbers, never invents them.
-- `widgets/gmp_chart.dart` + `widgets/indicators/` — k_chart_plus with
+- **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
+  (`assets/tv/` bundled standalone JS + chart.html; `widgets/tv_chart.dart`
+  WebView + `tvChartPayload` serializer; refit only on timeframe change;
+  StochRSI uses the v5 panes API). All other platforms fall back to
+  `widgets/gmp_chart.dart` + `widgets/indicators/` — k_chart_plus with
   custom indicators (SMMA overlay, StochRSI subpane, divergence markers).
   Custom indicators cache per-candle values in an **Expando keyed by
   entity**, so the indicator instances MUST be the same objects in
