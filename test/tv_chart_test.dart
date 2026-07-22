@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:gold_master_pro/models/candle.dart';
-import 'package:gold_master_pro/widgets/tv_chart.dart';
+import 'package:gold_master_pro/widgets/tv_payload.dart';
 
 List<Candle> _trend(int n) => [
       for (var i = 0; i < n; i++)

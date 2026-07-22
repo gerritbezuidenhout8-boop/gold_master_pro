@@ -71,6 +71,25 @@
     } catch (e) { /* pane sizing is cosmetic */ }
   }
 
+  // Android registers a GmpErr JavaScript channel; report engine errors
+  // so the app can fall back to the native chart renderer.
+  window.onerror = function (msg) {
+    try {
+      if (window.GmpErr && window.GmpErr.postMessage) {
+        window.GmpErr.postMessage(String(msg));
+      }
+    } catch (e) { /* never let error reporting throw */ }
+  };
+
+  // Web embeds this page in a same-origin iframe and drives it via
+  // postMessage; Android calls window.gmp directly through the WebView.
+  window.addEventListener('message', function (e) {
+    var d = e && e.data;
+    if (d && d.type === 'setAll' && window.gmp) {
+      window.gmp.setAll(d.json, !!d.fit);
+    }
+  });
+
   window.gmp = {
     setAll: function (json, fit) {
       var d = JSON.parse(json);

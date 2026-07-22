@@ -51,9 +51,17 @@ class _ChartScreenState extends State<ChartScreen> {
   late final CandleStreamer _streamer =
       widget.streamCandles ?? MarketData.instance.candleStream;
 
-  /// TradingView Lightweight Charts renders on Android (WebView); other
-  /// platforms keep the native k_chart renderer.
-  bool get _useTv => !kIsWeb && Platform.isAndroid;
+  /// TradingView Lightweight Charts renders on Android (WebView) and web
+  /// (iframe); desktop — and any engine failure — falls back to the
+  /// native k_chart renderer.
+  bool _tvFailed = false;
+  bool get _useTv => !_tvFailed && (kIsWeb || Platform.isAndroid);
+
+  void _onTvEngineFailed() {
+    if (_tvFailed || !mounted) return;
+    _tvFailed = true;
+    _rebuild(); // recompute k_chart entities and swap renderers
+  }
 
   @override
   void initState() {
@@ -242,6 +250,7 @@ class _ChartScreenState extends State<ChartScreen> {
         timeframe: _timeframe,
         showStochRsi: _showStochRsi,
         showDivergence: _showDivergence,
+        onEngineFailed: _onTvEngineFailed,
       );
     }
     return GmpChart(
