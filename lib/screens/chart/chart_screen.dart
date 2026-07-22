@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:k_chart_plus/k_chart_plus.dart' show KLineEntity;
 
@@ -11,6 +13,7 @@ import '../../services/market_data.dart';
 import '../../services/spot_gold_data.dart';
 import '../../widgets/gmp_card.dart';
 import '../../widgets/gmp_chart.dart';
+import '../../widgets/tv_chart.dart';
 
 typedef CandleLoader = Future<List<Candle>> Function(String timeframe);
 typedef CandleStreamer = Stream<Candle> Function(String timeframe);
@@ -47,6 +50,10 @@ class _ChartScreenState extends State<ChartScreen> {
       widget.loadCandles ?? MarketData.instance.fetchCandles;
   late final CandleStreamer _streamer =
       widget.streamCandles ?? MarketData.instance.candleStream;
+
+  /// TradingView Lightweight Charts renders on Android (WebView); other
+  /// platforms keep the native k_chart renderer.
+  bool get _useTv => !kIsWeb && Platform.isAndroid;
 
   @override
   void initState() {
@@ -104,8 +111,10 @@ class _ChartScreenState extends State<ChartScreen> {
     _recentDiv = divs.isNotEmpty && divs.last.index >= _candles.length - 8
         ? divs.last
         : null;
-    setState(() => _datas = GmpChart.prepare(_candles,
-        stochRsi: _showStochRsi, divergence: _showDivergence));
+    setState(() => _datas = _useTv
+        ? const <KLineEntity>[] // TvChart reads _candles directly
+        : GmpChart.prepare(_candles,
+            stochRsi: _showStochRsi, divergence: _showDivergence));
   }
 
   double? _lastNonNull(List<double?> xs) {
@@ -226,6 +235,14 @@ class _ChartScreenState extends State<ChartScreen> {
     final datas = _datas;
     if (datas == null) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (_useTv) {
+      return TvChart(
+        candles: _candles,
+        timeframe: _timeframe,
+        showStochRsi: _showStochRsi,
+        showDivergence: _showDivergence,
+      );
     }
     return GmpChart(
       datas: datas,

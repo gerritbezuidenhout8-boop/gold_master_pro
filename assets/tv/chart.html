@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- Chart engine: TradingView Lightweight Charts v5.2.0 (Apache-2.0)
+     https://github.com/tradingview/lightweight-charts -->
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0A0A0B; overflow: hidden; }
+  #c { position: absolute; inset: 0; }
+</style>
+<script src="lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div id="c"></div>
+<script>
+(function () {
+  var LWC = LightweightCharts;
+  var chart = LWC.createChart(document.getElementById('c'), {
+    autoSize: true,
+    layout: {
+      background: { type: 'solid', color: '#0A0A0B' },
+      textColor: '#8E8A7E',
+      panes: { separatorColor: '#26211A', enableResize: false }
+    },
+    grid: {
+      vertLines: { color: '#16130E' },
+      horzLines: { color: '#16130E' }
+    },
+    crosshair: { mode: 0 },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#26211A' },
+    rightPriceScale: { borderColor: '#26211A' }
+  });
+
+  var candles = chart.addSeries(LWC.CandlestickSeries, {
+    upColor: '#25C685', downColor: '#E5484D',
+    wickUpColor: '#25C685', wickDownColor: '#E5484D',
+    borderVisible: false
+  });
+  var volume = chart.addSeries(LWC.HistogramSeries, {
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+    lastValueVisible: false,
+    priceLineVisible: false
+  });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+  var smmaColors = ['#F2CC5A', '#35CDAC', '#B48EE3'];
+  var smma = smmaColors.map(function (col) {
+    return chart.addSeries(LWC.LineSeries, {
+      color: col, lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: false,
+      crosshairMarkerVisible: false
+    });
+  });
+
+  var stochK = null, stochD = null, markersApi = null;
+  function ensureStoch() {
+    if (stochK) return;
+    stochK = chart.addSeries(LWC.LineSeries, {
+      color: '#E3B84C', lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: false
+    }, 1);
+    stochD = chart.addSeries(LWC.LineSeries, {
+      color: '#35CDAC', lineWidth: 1,
+      priceLineVisible: false, lastValueVisible: false
+    }, 1);
+    try {
+      var panes = chart.panes();
+      if (panes[1] && panes[1].setStretchFactor) panes[1].setStretchFactor(0.25);
+    } catch (e) { /* pane sizing is cosmetic */ }
+  }
+
+  window.gmp = {
+    setAll: function (json, fit) {
+      var d = JSON.parse(json);
+      candles.setData(d.candles || []);
+      volume.setData(d.volume || []);
+      for (var i = 0; i < 3; i++) {
+        smma[i].setData((d.smma && d.smma[i]) || []);
+      }
+      if (d.stochK && d.stochK.length) {
+        ensureStoch();
+        stochK.setData(d.stochK);
+        stochD.setData(d.stochD || []);
+      } else if (stochK) {
+        stochK.setData([]);
+        stochD.setData([]);
+      }
+      var markers = d.markers || [];
+      if (markersApi) markersApi.setMarkers(markers);
+      else if (markers.length) markersApi = LWC.createSeriesMarkers(candles, markers);
+      if (fit) chart.timeScale().fitContent();
+      return 'ok:' + (d.candles ? d.candles.length : 0);
+    }
+  };
+})();
+</script>
+</body>
+</html>
