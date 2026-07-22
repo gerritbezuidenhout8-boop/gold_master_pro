@@ -11,9 +11,11 @@ import '../../indicators/rsi.dart';
 import '../../models/candle.dart';
 import '../../services/market_data.dart';
 import '../../services/spot_gold_data.dart';
-import '../../widgets/gmp_card.dart';
+import '../../widgets/bottom_trade_panel.dart';
+import '../../widgets/chart_widget.dart';
 import '../../widgets/gmp_chart.dart';
-import '../../widgets/tv_chart.dart';
+import '../../widgets/indicator_bar.dart';
+import '../../widgets/timeframe_selector.dart';
 
 typedef CandleLoader = Future<List<Candle>> Function(String timeframe);
 typedef CandleStreamer = Stream<Candle> Function(String timeframe);
@@ -144,27 +146,29 @@ class _ChartScreenState extends State<ChartScreen> {
       appBar: AppBar(title: Text('${AppConstants.symbol} · $_timeframe')),
       body: Column(
         children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                for (final tf in AppConstants.timeframes)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(tf),
-                      selected: _timeframe == tf,
-                      onSelected: (_) => _selectTimeframe(tf),
-                    ),
-                  ),
-              ],
-            ),
+          TimeframeSelector(
+            selected: _timeframe,
+            onSelected: _selectTimeframe,
           ),
-          _momentumBar(),
+          IndicatorBar(
+            stochK: _stochK,
+            stochD: _stochD,
+            recentDivergence: _recentDiv,
+            showStochRsi: _showStochRsi,
+            showDivergence: _showDivergence,
+            onStochRsiChanged: (v) => setState(() {
+              _showStochRsi = v;
+              _rebuild();
+            }),
+            onDivergenceChanged: (v) => setState(() {
+              _showDivergence = v;
+              _rebuild();
+            }),
+          ),
           Expanded(child: _buildChartArea()),
+          const BottomTradePanel(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
             child: ValueListenableBuilder<String>(
               valueListenable: SpotGoldMarketData.candleSource,
               builder: (context, source, _) => Text(
@@ -177,55 +181,6 @@ class _ChartScreenState extends State<ChartScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _momentumBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      child: Row(
-        children: [
-          if (_stochK != null)
-            Text(
-              'StochRSI ${_stochK!.toStringAsFixed(1)} / '
-              '${_stochD?.toStringAsFixed(1) ?? '—'}',
-              style: const TextStyle(fontSize: 12, color: AppTheme.textPrimary),
-            ),
-          if (_recentDiv != null) ...[
-            const SizedBox(width: 8),
-            GmpPill(
-              text: _recentDiv!.type == DivergenceType.bullish
-                  ? 'Bull div'
-                  : 'Bear div',
-              color: _recentDiv!.type == DivergenceType.bullish
-                  ? AppTheme.bull
-                  : AppTheme.bear,
-            ),
-          ],
-          const Spacer(),
-          _toggle('StochRSI', _showStochRsi,
-              (v) => setState(() {
-                    _showStochRsi = v;
-                    _rebuild();
-                  })),
-          const SizedBox(width: 6),
-          _toggle('Divergence', _showDivergence,
-              (v) => setState(() {
-                    _showDivergence = v;
-                    _rebuild();
-                  })),
-        ],
-      ),
-    );
-  }
-
-  Widget _toggle(String label, bool value, ValueChanged<bool> onChanged) {
-    return FilterChip(
-      label: Text(label, style: const TextStyle(fontSize: 11)),
-      selected: value,
-      showCheckmark: false,
-      visualDensity: VisualDensity.compact,
-      onSelected: onChanged,
     );
   }
 
@@ -245,7 +200,7 @@ class _ChartScreenState extends State<ChartScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_useTv) {
-      return TvChart(
+      return ChartWidget(
         candles: _candles,
         timeframe: _timeframe,
         showStochRsi: _showStochRsi,

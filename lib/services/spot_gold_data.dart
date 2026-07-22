@@ -239,6 +239,8 @@ SpotQuote? quoteFromSwissquote(String body) {
   final ts = (first?['ts'] as num?)?.toInt();
   return SpotQuote(
     price: (bid + ask) / 2,
+    bid: bid,
+    ask: ask,
     time: ts == null
         ? DateTime.now().toUtc()
         : DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true),

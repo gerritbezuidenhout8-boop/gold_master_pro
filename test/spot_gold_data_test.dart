@@ -78,6 +78,9 @@ void main() {
           '"ts":1784703772687}]';
       final q = quoteFromSwissquote(body)!;
       expect(q.price, closeTo((4113.946 + 4114.604) / 2, 1e-9));
+      expect(q.bid, 4113.946);
+      expect(q.ask, 4114.604);
+      expect(q.spread, closeTo(0.658, 1e-9));
       expect(q.time.millisecondsSinceEpoch, 1784703772687);
       expect(q.source, contains('Swissquote'));
     });

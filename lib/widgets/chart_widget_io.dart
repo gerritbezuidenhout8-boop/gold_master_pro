@@ -11,8 +11,8 @@ import 'tv_payload.dart';
 /// page is a bundled asset; candles and overlays are pushed as JSON.
 /// Engine errors are reported through [onEngineFailed] so the caller can
 /// fall back to the native renderer.
-class TvChart extends StatefulWidget {
-  const TvChart({
+class ChartWidget extends StatefulWidget {
+  const ChartWidget({
     super.key,
     required this.candles,
     required this.timeframe,
@@ -28,10 +28,10 @@ class TvChart extends StatefulWidget {
   final VoidCallback? onEngineFailed;
 
   @override
-  State<TvChart> createState() => _TvChartState();
+  State<ChartWidget> createState() => _ChartWidgetState();
 }
 
-class _TvChartState extends State<TvChart> {
+class _ChartWidgetState extends State<ChartWidget> {
   late final WebViewController _controller;
   bool _pageReady = false;
   bool _failed = false;
@@ -62,7 +62,7 @@ class _TvChartState extends State<TvChart> {
   }
 
   @override
-  void didUpdateWidget(TvChart old) {
+  void didUpdateWidget(ChartWidget old) {
     super.didUpdateWidget(old);
     final refit = old.timeframe != widget.timeframe;
     if (refit ||

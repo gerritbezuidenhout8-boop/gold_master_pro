@@ -12,8 +12,8 @@ import 'tv_payload.dart';
 /// TradingView Lightweight Charts renderer for Flutter web: the bundled
 /// chart page runs in a same-origin iframe and is driven by calling its
 /// `gmp.setAll` directly.
-class TvChart extends StatefulWidget {
-  const TvChart({
+class ChartWidget extends StatefulWidget {
+  const ChartWidget({
     super.key,
     required this.candles,
     required this.timeframe,
@@ -29,10 +29,10 @@ class TvChart extends StatefulWidget {
   final VoidCallback? onEngineFailed;
 
   @override
-  State<TvChart> createState() => _TvChartState();
+  State<ChartWidget> createState() => _ChartWidgetState();
 }
 
-class _TvChartState extends State<TvChart> {
+class _ChartWidgetState extends State<ChartWidget> {
   static int _instances = 0;
 
   late final String _viewType = 'gmp-tv-chart-${_instances++}';
@@ -56,7 +56,7 @@ class _TvChartState extends State<TvChart> {
   }
 
   @override
-  void didUpdateWidget(TvChart old) {
+  void didUpdateWidget(ChartWidget old) {
     super.didUpdateWidget(old);
     final refit = old.timeframe != widget.timeframe;
     if (refit ||

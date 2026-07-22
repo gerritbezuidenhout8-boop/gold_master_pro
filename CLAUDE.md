@@ -65,7 +65,7 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   narrative). No Flutter imports, no network. Any future LLM layer
   narrates computed numbers, never invents them.
 - **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
-  (`assets/tv/` bundled standalone JS + chart.html; `widgets/tv_chart.dart`
+  (`assets/tv/` bundled standalone JS + chart.html; `widgets/chart_widget.dart`
   WebView + `tvChartPayload` serializer; refit only on timeframe change;
   StochRSI uses the v5 panes API). All other platforms fall back to
   `widgets/gmp_chart.dart` + `widgets/indicators/` — k_chart_plus with

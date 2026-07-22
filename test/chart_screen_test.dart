@@ -6,7 +6,9 @@ import 'package:k_chart_plus/k_chart_plus.dart' show KChartWidget;
 
 import 'package:gold_master_pro/core/theme/app_theme.dart';
 import 'package:gold_master_pro/models/candle.dart';
+import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/screens/chart/chart_screen.dart';
+import 'package:gold_master_pro/services/market_data.dart';
 import 'package:gold_master_pro/widgets/gmp_chart.dart';
 
 List<Candle> _syntheticCandles(int n) => [
@@ -23,7 +25,33 @@ List<Candle> _syntheticCandles(int n) => [
 
 Stream<Candle> _noStream(String _) => const Stream.empty();
 
+/// The chart screen's BottomTradePanel subscribes to the app-wide quote
+/// stream; give it an inert feed so no real socket opens under the test
+/// clock.
+class _FakeMarketData implements MarketData {
+  @override
+  Future<List<Candle>> fetchCandles(String timeframe) async =>
+      _syntheticCandles(60);
+
+  @override
+  Stream<Candle> candleStream(String timeframe) => const Stream.empty();
+
+  @override
+  Stream<SpotQuote> quoteStream() => const Stream.empty();
+
+  @override
+  Future<SpotQuote?> fetchXauSpot() async => null;
+}
+
 void main() {
+  late MarketData real;
+
+  setUp(() {
+    real = MarketData.instance;
+    MarketData.instance = _FakeMarketData();
+  });
+
+  tearDown(() => MarketData.instance = real);
   testWidgets(
       'renders the chart engine once candles load, reloads on '
       'timeframe change', (tester) async {
