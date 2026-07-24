@@ -11,7 +11,10 @@ import 'market_data.dart';
 /// Market data aligned to real gold (what CFD brokers track):
 ///  - candles: COMEX gold futures (GC=F) via Yahoo's chart API — within a
 ///    few dollars of spot; unofficial, so Binance PAXG is the automatic
-///    fallback (and the only path on web, where Yahoo blocks CORS)
+///    fallback (and the only path on web, where Yahoo blocks CORS). Both
+///    proxies are then shifted so the last close equals the live gold-api
+///    XAU spot, so the chart reads at true spot levels (gold-api has no
+///    OHLC history of its own).
 ///  - live quotes: XAU/USD bank spot polled from Swissquote (native),
 ///    falling back to gold-api.com, then to the PAXG stream. On web, where
 ///    Swissquote blocks CORS, gold-api.com's real XAU spot is polled
@@ -22,9 +25,14 @@ class SpotGoldMarketData implements MarketData {
 
   final BinanceMarketData _binance;
 
+  /// Offset applied to align the proxy candle series to the live gold-api
+  /// XAU spot; reused by [candleStream] so streamed bars land at the same
+  /// levels as the history.
+  double _spotOffset = 0;
+
   /// UI-facing label of the source that actually supplied the candles.
   static final ValueNotifier<String> candleSource =
-      ValueNotifier('XAU gold futures');
+      ValueNotifier('XAU/USD spot · gold-api');
 
   static const Map<String, (String interval, String range)> _yahoo = {
     'M5': ('5m', '5d'),
@@ -46,38 +54,72 @@ class SpotGoldMarketData implements MarketData {
     if (spec == null) {
       throw ArgumentError.value(timeframe, 'timeframe', 'unknown timeframe');
     }
-    if (!kIsWeb) {
-      try {
-        final url = 'https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF'
-            '?interval=${spec.$1}&range=${spec.$2}';
-        final res = await http
-            .get(Uri.parse(url), headers: _ua)
-            .timeout(const Duration(seconds: 8));
-        if (res.statusCode == 200) {
-          var candles = candlesFromYahooChart(res.body);
-          if (timeframe == 'H4') {
-            candles = aggregateCandles(candles, const Duration(hours: 4));
-          }
-          if (candles.length > 500) {
-            candles = candles.sublist(candles.length - 500);
-          }
-          if (candles.isNotEmpty) {
-            candleSource.value = 'XAU gold futures · Yahoo';
-            return candles;
-          }
-        }
-      } on Exception {
-        // fall through to PAXG
-      }
-    }
-    final fallback = await _binance.fetchCandles(timeframe);
-    candleSource.value = 'PAXG/USD · Binance';
-    return fallback;
+    final yahoo = kIsWeb ? null : await _tryYahoo(timeframe, spec);
+    if (yahoo != null) return _alignToSpot(yahoo, 'GC=F');
+    return _alignToSpot(await _binance.fetchCandles(timeframe), 'PAXG');
   }
+
+  /// GC=F futures candles from Yahoo, or null when unavailable/empty.
+  Future<List<Candle>?> _tryYahoo(String timeframe, (String, String) spec) async {
+    try {
+      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF'
+          '?interval=${spec.$1}&range=${spec.$2}';
+      final res = await http
+          .get(Uri.parse(url), headers: _ua)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      var candles = candlesFromYahooChart(res.body);
+      if (timeframe == 'H4') {
+        candles = aggregateCandles(candles, const Duration(hours: 4));
+      }
+      if (candles.length > 500) {
+        candles = candles.sublist(candles.length - 500);
+      }
+      return candles.isEmpty ? null : candles;
+    } on Exception {
+      return null;
+    }
+  }
+
+  /// Shifts the proxy series so its last close equals the live gold-api XAU
+  /// spot, so the chart reads at true spot levels (gold-api has no OHLC
+  /// history, so a keyless proxy supplies the bar shapes). Records the
+  /// offset for [candleStream]; falls back to raw bars if spot is
+  /// unreachable.
+  Future<List<Candle>> _alignToSpot(List<Candle> candles, String proxy) async {
+    if (candles.isEmpty) {
+      candleSource.value = 'XAU/USD · $proxy';
+      return candles;
+    }
+    final spot = await fetchXauSpot();
+    if (spot == null) {
+      _spotOffset = 0;
+      candleSource.value = 'XAU/USD · $proxy';
+      return candles;
+    }
+    _spotOffset = spot.price - candles.last.close;
+    candleSource.value = 'XAU/USD spot · gold-api ($proxy bars)';
+    return [for (final c in candles) _shift(c, _spotOffset)];
+  }
+
+  static Candle _shift(Candle c, double d) => Candle(
+        time: c.time,
+        open: c.open + d,
+        high: c.high + d,
+        low: c.low + d,
+        close: c.close + d,
+        volume: c.volume,
+      );
 
   @override
   Stream<Candle> candleStream(String timeframe) {
-    if (kIsWeb) return _binance.candleStream(timeframe);
+    // Streamed bars are shifted by the same offset as the loaded history so
+    // they stay at gold-api spot levels.
+    if (kIsWeb) {
+      return _binance
+          .candleStream(timeframe)
+          .map((c) => _shift(c, _spotOffset));
+    }
     final spec = _yahoo[timeframe];
     if (spec == null) {
       throw ArgumentError.value(timeframe, 'timeframe', 'unknown timeframe');
@@ -94,7 +136,7 @@ class SpotGoldMarketData implements MarketData {
         candles = aggregateCandles(candles, const Duration(hours: 4));
       }
       return candles.isEmpty ? null : candles.last;
-    });
+    }).map((c) => _shift(c, _spotOffset));
   }
 
   @override

@@ -4,8 +4,9 @@ import '../core/theme/app_theme.dart';
 import '../indicators/rsi.dart';
 import 'gmp_card.dart';
 
-/// Indicator readout + toggles above the chart: latest StochRSI %K/%D, a
-/// recent-divergence pill, and show/hide chips for the chart overlays.
+/// Indicator readout + toggles above the chart: the latest StochRSI %K/%D
+/// (also drawn on the chart itself), a recent-divergence pill, and show/hide
+/// chips for the chart overlays.
 class IndicatorBar extends StatelessWidget {
   const IndicatorBar({
     super.key,
@@ -33,7 +34,7 @@ class IndicatorBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
       child: Row(
         children: [
-          if (stochK != null)
+          if (showStochRsi && stochK != null)
             Text(
               'StochRSI ${stochK!.toStringAsFixed(1)} / '
               '${stochD?.toStringAsFixed(1) ?? '—'}',

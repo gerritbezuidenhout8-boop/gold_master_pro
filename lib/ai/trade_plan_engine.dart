@@ -44,6 +44,19 @@ class TradePlan {
   final List<String> rationale;
 
   String get action => direction == TradeDirection.long ? 'BUY' : 'SELL';
+
+  /// How strongly the score favours the direction (0–100): the distance of
+  /// the score from the neutral 50, doubled.
+  int get conviction => ((score - 50).abs() * 2).clamp(0, 100);
+
+  String get convictionLabel => conviction >= 60
+      ? 'High'
+      : conviction >= 30
+          ? 'Moderate'
+          : 'Low';
+
+  /// A high-conviction setup (score ≥ 80 or ≤ 20) — what [generate] gates on.
+  bool get isHighConviction => conviction >= 60;
 }
 
 /// Turns a high-conviction Gold Master Score into an entry / stop /
@@ -64,7 +77,40 @@ class TradePlanEngine {
     final long = analysis.score >= bullishThreshold;
     final short = analysis.score <= bearishThreshold;
     if (!long && !short) return null;
+    return _build(
+        analysis: analysis,
+        candles: candles,
+        levels: levels,
+        long: long,
+        now: now);
+  }
 
+  /// Always returns a directional plan: the Gold Master Score decides the
+  /// side (buy at ≥ 50, sell below), and computes the entry, stop and
+  /// targets. Use where analysis should always show a read — [TradePlan
+  /// .conviction] communicates how strong it is. Null only with no candles.
+  static TradePlan? signal({
+    required GoldMasterAnalysis analysis,
+    required List<Candle> candles,
+    required KeyLevelsResult levels,
+    DateTime? now,
+  }) {
+    if (candles.isEmpty) return null;
+    return _build(
+        analysis: analysis,
+        candles: candles,
+        levels: levels,
+        long: analysis.score >= 50,
+        now: now);
+  }
+
+  static TradePlan _build({
+    required GoldMasterAnalysis analysis,
+    required List<Candle> candles,
+    required KeyLevelsResult levels,
+    required bool long,
+    DateTime? now,
+  }) {
     final entry = candles.last.close;
     final atr = Atr.latest(candles) ?? entry * 0.0015;
     final n = candles.length;

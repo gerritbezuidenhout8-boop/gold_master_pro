@@ -25,6 +25,22 @@ List<Candle> _syntheticCandles(int n) => [
 
 Stream<Candle> _noStream(String _) => const Stream.empty();
 
+/// Market data whose quote stream is caller-controlled, so a test can push
+/// a spot tick and watch it fold into the forming candle.
+class _QuoteFakeMarketData implements MarketData {
+  _QuoteFakeMarketData(this._quotes);
+  final Stream<SpotQuote> _quotes;
+  @override
+  Future<List<Candle>> fetchCandles(String timeframe) async =>
+      _syntheticCandles(60);
+  @override
+  Stream<Candle> candleStream(String timeframe) => const Stream.empty();
+  @override
+  Stream<SpotQuote> quoteStream() => _quotes;
+  @override
+  Future<SpotQuote?> fetchXauSpot() async => null;
+}
+
 /// The chart screen's BottomTradePanel subscribes to the app-wide quote
 /// stream; give it an inert feed so no real socket opens under the test
 /// clock.
@@ -109,6 +125,36 @@ void main() {
     expect(tester.widget<GmpChart>(find.byType(GmpChart)).datas, hasLength(61));
 
     await updates.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('folds the live spot quote into the forming candle',
+      (tester) async {
+    // Broadcast: both ChartScreen and the BottomTradePanel listen to it.
+    final quotes = StreamController<SpotQuote>.broadcast();
+    MarketData.instance = _QuoteFakeMarketData(quotes.stream);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: ChartScreen(
+        loadCandles: (_) => Future.value(_syntheticCandles(60)),
+        streamCandles: _noStream,
+      ),
+    ));
+    await tester.pump();
+    final before = tester.widget<GmpChart>(find.byType(GmpChart)).datas;
+    expect(before.last.close, 100.5 + 59); // last synthetic close
+
+    quotes.add(SpotQuote(price: 175, time: DateTime.utc(2026), source: 'test'));
+    await tester.pump(); // deliver the tick (marks dirty)
+    await tester.pump(const Duration(seconds: 1)); // throttle window
+    await tester.pump();
+
+    final after = tester.widget<GmpChart>(find.byType(GmpChart)).datas;
+    expect(after.last.close, 175); // forming candle tracks spot
+    expect(after, hasLength(60)); // updated in place, no new candle
+
+    await quotes.close();
     await tester.pumpWidget(const SizedBox());
   });
 

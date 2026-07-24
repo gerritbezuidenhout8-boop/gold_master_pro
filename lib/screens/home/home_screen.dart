@@ -10,6 +10,7 @@ import '../../widgets/gold_button.dart';
 import '../../widgets/live_price_card.dart';
 import '../../widgets/score_gauge.dart';
 import '../../widgets/stat_tile.dart';
+import '../calendar/economic_calendar_screen.dart';
 import '../settings/settings_screen.dart';
 import '../trade_plan/trade_plan_screen.dart';
 
@@ -391,6 +392,18 @@ class _HomeDrawer extends StatelessWidget {
               ),
             ),
             const Divider(color: AppTheme.hairline),
+            ListTile(
+              leading:
+                  const Icon(Icons.event_note_outlined, color: AppTheme.gold),
+              title: const Text('Economic Calendar'),
+              subtitle: const Text('This week · events that move gold',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const EconomicCalendarScreen()));
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.settings_outlined, color: AppTheme.gold),
               title: const Text('Settings'),

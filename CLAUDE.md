@@ -26,7 +26,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; ~103 tests |
+| `flutter analyze` / `flutter test` | keep both green; ~146 tests (v1.1.0) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -52,15 +52,21 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   from H1** via `aggregateCandles`); ticker/alerts from **Swissquote**
   public XAU/USD bbo (mid of first spread profile) with gold-api.com
   fallback. **On web (Yahoo / Swissquote block CORS): candles fall back to
-  Binance PAXG, but live quotes poll gold-api.com's real XAU spot** (not
-  the PAXG ticker) — added v1.0.9. Yahoo delisted `XAUUSD=X` — GC=F is the only
-  gold symbol. Chart caption reads `SpotGoldMarketData.candleSource`.
-  True spot XAUUSD *candles* are paid-only; this is the free ceiling.
+  Binance PAXG, live quotes poll gold-api.com's real XAU spot** (v1.0.9).
+  **v1.1.0: `_alignToSpot()` rebases every candle series (GC=F or PAXG) by
+  `spot − lastClose` so the chart reads at true gold-api XAU spot levels;
+  `_spotOffset` is reused to shift streamed bars. gold-api has no OHLC, so a
+  proxy still supplies bar *shapes* — only levels are spot (shift-invariant
+  for RSI/MACD/StochRSI).** Yahoo delisted `XAUUSD=X` — GC=F is the only gold
+  symbol. Chart caption reads `SpotGoldMarketData.candleSource`. True spot
+  XAUUSD *candles* are paid-only; this is the free ceiling.
 - `indicators/` — pure, tested Dart: `Smma`, `Rsi`/`StochRsi`/
-  `RsiDivergence` (pivot-based), `KeyLevels` (**UTC midnight days, weeks
-  start Monday 00:00 UTC** — never mix with NY-5pm), `Fibonacci.auto`
-  (pivot strength 5, lookback 120), `CandlestickDetector` (14 threshold
-  patterns, geometric only).
+  `RsiDivergence` (pivot-based), `Macd` (EMA 12/26/9 → line/signal/
+  histogram), `Adx` + ±DI (Wilder, trend strength), `Atr` (Wilder),
+  `KeyLevels` (**UTC midnight days, weeks start Monday 00:00 UTC** — never
+  mix with NY-5pm), `Fibonacci.auto` (pivot strength 5, lookback 120),
+  `CandlestickDetector` (14 threshold patterns, geometric only). MACD/ADX
+  surface in the Analysis Momentum + Trend-Strength cards.
 - `ai/gold_master_engine.dart` — deterministic weighted rubric (5
   components → score 0-100, bias at 60/40, confidence, clarity, template
   narrative). No Flutter imports, no network. Any future LLM layer
@@ -73,7 +79,11 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   (`indicators/atr.dart`, Wilder), TP1/TP2 = nearest key levels beyond
   entry with R-multiple fallback. `screens/trade_plan/` renders it
   (mockup screen 8); reached by tapping Home's AI Recommendation card.
-  Education/analysis only — disclaimer on the screen.
+  Education/analysis only — disclaimer on the screen. **v1.1.0 `signal()`
+  always returns a directional plan (long if score ≥ 50 else short) with
+  `conviction`/`convictionLabel`/`isHighConviction`; the Analysis "Trade
+  Signal" card uses it (entry/TP1/TP2/SL/R:R). `generate()` (80/20 gate)
+  still backs the Trade Plan screen; both share `_build()`.**
 - **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
   (`assets/tv/` bundled standalone JS + chart.html; `widgets/chart_widget.dart`
   WebView + `tvChartPayload` serializer; refit only on timeframe change;
@@ -83,6 +93,16 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   Custom indicators cache per-candle values in an **Expando keyed by
   entity**, so the indicator instances MUST be the same objects in
   `prepare()` (calc) and the widget (draw) — they're static on GmpChart.
+  **v1.1.0: ChartScreen folds each live spot tick into the forming candle
+  (`_onSpot`, throttled); StochRSI value shows both on the `IndicatorBar`
+  and as an on-chart `#readout` overlay in chart.html.** Gotcha: the browser
+  caches `chart.html` — hard-refresh after editing it.
+- `screens/onboarding/` — one-time intro (3 slides), gated by
+  `AppSettings.onboardingComplete`; `main.dart` shows it before the shell.
+- `services/economic_calendar.dart` + `screens/calendar/` — this-week
+  ForexFactory calendar (nfs.faireconomy.media weekly JSON, keyless; live
+  native, bundled `assets/calendar/ff_thisweek.json` snapshot on web/offline
+  — no CORS). Reached from the Home drawer.
 - `state/alerts_controller.dart` — app-wide singleton ChangeNotifier
   (deliberately no Riverpod). `widgets/alert_watcher.dart` wraps the
   shell, evaluates `AlertEngine.fires` crossings, one-shot until re-armed.

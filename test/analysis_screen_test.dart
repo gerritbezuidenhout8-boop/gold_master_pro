@@ -87,7 +87,8 @@ void main() {
 
     await tester.scrollUntilVisible(find.text('KEY LEVELS (UTC DAYS)'), 250);
     expect(find.text('Prev Week High'), findsOneWidget);
-    expect(find.text('119.00'), findsOneWidget);
+    // 119.00 shows as Prev Week High and (legitimately) as the signal's TP1.
+    expect(find.text('119.00'), findsWidgets);
     await tester.scrollUntilVisible(find.text('200.00'), 250); // ATH spike
 
     await tester.scrollUntilVisible(find.text('AUTO FIBONACCI · H1'), 250);
@@ -115,6 +116,21 @@ void main() {
     expect(find.text('TREND ANALYSIS · M5'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('MOVING AVERAGES · M5'), 250);
     expect(find.text('MOVING AVERAGES · M5'), findsOneWidget);
+  });
+
+  testWidgets('shows an AI-score trade signal with entry, TP and SL',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: AnalysisScreen()));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.scrollUntilVisible(find.text('TRADE SIGNAL · H1'), 250);
+    // Bullish fixture (uptrend + bullish engulfing) → a BUY plan.
+    expect(find.text('BUY'), findsOneWidget);
+    expect(find.text('Take Profit 1'), findsOneWidget);
+    expect(find.text('Take Profit 2'), findsOneWidget);
+    expect(find.text('Stop Loss'), findsOneWidget);
+    expect(find.textContaining('Gold Master Score'), findsOneWidget);
   });
 
   testWidgets('theme variant renders without errors', (tester) async {

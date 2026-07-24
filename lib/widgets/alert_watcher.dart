@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/utils/format.dart';
 import '../models/alert_rule.dart';
 import '../models/spot_quote.dart';
+import '../services/app_settings.dart';
 import '../services/market_data.dart';
 import '../state/alerts_controller.dart';
 
@@ -33,6 +34,9 @@ class _AlertWatcherState extends State<AlertWatcher> {
     AlertsController.instance.load();
     final quotes = widget.quotes ?? MarketData.instance.quoteStream();
     _sub = quotes.listen((q) {
+      // Master switch: when price alerts are off, don't evaluate crossings
+      // at all (the controller re-seeds cleanly when turned back on).
+      if (!AppSettings.instance.priceAlerts.value) return;
       final fired = AlertsController.instance.onPrice(q.price);
       if (fired.isEmpty || !mounted) return;
       for (final rule in fired) {

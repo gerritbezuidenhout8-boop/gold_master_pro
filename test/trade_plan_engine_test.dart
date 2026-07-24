@@ -90,6 +90,59 @@ void main() {
     expect(plan, isNull);
   });
 
+  test('signal() always returns a directional plan from the score', () {
+    final bullAnalysis =
+        GoldMasterEngine.analyze(h1: bullishH1(), d1: bullishD1());
+    final bull = TradePlanEngine.signal(
+      analysis: bullAnalysis,
+      candles: bullishH1(),
+      levels: KeyLevels.compute(bullishD1()),
+    )!;
+    expect(bull.direction, TradeDirection.long);
+    expect(bull.action, 'BUY');
+    expect(bull.isHighConviction, isTrue); // strong fixture
+    expect(bull.stop, lessThan(bull.entry));
+    expect(bull.entry, lessThan(bull.tp1));
+
+    final bearH1 = _mirror(bullishH1(), 200);
+    final bearD1 = _mirror(bullishD1(), 200);
+    final bear = TradePlanEngine.signal(
+      analysis: GoldMasterEngine.analyze(h1: bearH1, d1: bearD1),
+      candles: bearH1,
+      levels: KeyLevels.compute(bearD1),
+    )!;
+    expect(bear.direction, TradeDirection.short);
+    expect(bear.action, 'SELL');
+  });
+
+  test('signal() is a low-conviction long at a neutral score', () {
+    final h1 = _flat(60);
+    final d1 = _flat(30, daily: true);
+    final analysis = GoldMasterEngine.analyze(h1: h1, d1: d1);
+    expect(analysis.score, 50);
+    final plan = TradePlanEngine.signal(
+      analysis: analysis,
+      candles: h1,
+      levels: KeyLevels.compute(d1),
+    )!;
+    expect(plan.direction, TradeDirection.long); // >= 50 rule
+    expect(plan.conviction, 0);
+    expect(plan.convictionLabel, 'Low');
+    expect(plan.isHighConviction, isFalse);
+  });
+
+  test('signal() returns null without candles', () {
+    final analysis = GoldMasterEngine.analyze(h1: bullishH1(), d1: bullishD1());
+    expect(
+      TradePlanEngine.signal(
+        analysis: analysis,
+        candles: const [],
+        levels: KeyLevels.compute(bullishD1()),
+      ),
+      isNull,
+    );
+  });
+
   test('threshold is inclusive at exactly 80', () {
     // Build an analysis and only accept it if the fixture reaches >=80;
     // otherwise assert the gating explicitly via a lower threshold.

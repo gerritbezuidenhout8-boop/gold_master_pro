@@ -8,11 +8,19 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0A0A0B; overflow: hidden; }
   #c { position: absolute; inset: 0; }
+  #readout {
+    position: absolute; left: 10px; top: 8px; z-index: 3; pointer-events: none;
+    font: 600 11px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #8E8A7E; letter-spacing: 0.3px; display: none;
+  }
+  #readout .kv { color: #E3B84C; }
+  #readout .dv { color: #35CDAC; }
 </style>
 <script src="lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div id="c"></div>
+<div id="readout"></div>
 <script>
 (function () {
   var LWC = LightweightCharts;
@@ -98,13 +106,22 @@
       for (var i = 0; i < 3; i++) {
         smma[i].setData((d.smma && d.smma[i]) || []);
       }
+      var readout = document.getElementById('readout');
       if (d.stochK && d.stochK.length) {
         ensureStoch();
         stochK.setData(d.stochK);
         stochD.setData(d.stochD || []);
-      } else if (stochK) {
-        stochK.setData([]);
-        stochD.setData([]);
+        // Live numeric read-out on the chart itself.
+        var kv = d.stochK[d.stochK.length - 1].value;
+        var dv = (d.stochD && d.stochD.length)
+          ? d.stochD[d.stochD.length - 1].value : null;
+        readout.innerHTML = 'StochRSI '
+          + '<span class="kv">%K ' + kv.toFixed(1) + '</span>'
+          + (dv != null ? ' <span class="dv">%D ' + dv.toFixed(1) + '</span>' : '');
+        readout.style.display = 'block';
+      } else {
+        if (stochK) { stochK.setData([]); stochD.setData([]); }
+        readout.style.display = 'none';
       }
       var markers = d.markers || [];
       if (markersApi) markersApi.setMarkers(markers);

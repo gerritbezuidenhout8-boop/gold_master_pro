@@ -4,9 +4,8 @@ import '../../core/theme/app_theme.dart';
 import '../../services/app_settings.dart';
 import '../../widgets/gmp_card.dart';
 
-/// App settings (spec: Settings). Layout matches the design; toggles are
-/// display-only in this build and are wired to real behaviour as the
-/// underlying features land.
+/// App settings (spec: Settings). Auto Refresh and Price Alerts take real
+/// effect; Score/News/Push persist the choice but await the cloud backend.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -15,10 +14,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _priceAlerts = true;
-  bool _scoreAlerts = false;
-  bool _newsAlerts = false;
-  bool _push = false;
+  AppSettings get _s => AppSettings.instance;
 
   @override
   Widget build(BuildContext context) {
@@ -34,14 +30,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _value('Market Session', 'Auto'),
           ]),
           _section('Notifications', [
-            _toggle('Price Alerts', _priceAlerts,
-                (v) => setState(() => _priceAlerts = v)),
-            _toggle('Score Alerts', _scoreAlerts,
-                (v) => setState(() => _scoreAlerts = v)),
-            _toggle('News Alerts', _newsAlerts,
-                (v) => setState(() => _newsAlerts = v)),
-            _toggle('Push Notifications', _push,
-                (v) => setState(() => _push = v)),
+            _toggle('Price Alerts', _s.priceAlerts, _s.setPriceAlerts),
+            _toggle('Score Alerts', _s.scoreAlerts, _s.setScoreAlerts),
+            _toggle('News Alerts', _s.newsAlerts, _s.setNewsAlerts),
+            _toggle('Push Notifications', _s.pushNotifications,
+                _s.setPushNotifications),
           ]),
           _section('Data & Display', [
             _value('Data Source', 'Binance · gold-api'),
@@ -51,9 +44,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
-              'Auto Refresh is live on the Markets watchlist. Notification '
-              'toggles and other values are illustrative and take effect as '
-              'each feature is connected.',
+              'Auto Refresh drives the Markets watchlist, and Price Alerts '
+              'turns the in-app alert notifications on or off — both live. '
+              'Score, News and Push persist your choice but need the cloud '
+              'backend, which is not enabled in this build.',
               style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
           ),
@@ -147,14 +141,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _toggle(String label, bool value, ValueChanged<bool> onChanged) {
-    return SwitchListTile(
-      dense: true,
-      title: Text(label, style: const TextStyle(color: AppTheme.textPrimary)),
-      value: value,
-      activeThumbColor: AppTheme.gold,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      onChanged: onChanged,
+  Widget _toggle(
+      String label, ValueNotifier<bool> notifier, ValueChanged<bool> onChanged) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: notifier,
+      builder: (context, value, _) => SwitchListTile(
+        dense: true,
+        title: Text(label, style: const TextStyle(color: AppTheme.textPrimary)),
+        value: value,
+        activeThumbColor: AppTheme.gold,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        onChanged: onChanged,
+      ),
     );
   }
 }

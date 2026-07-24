@@ -9,6 +9,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../indicators/rsi.dart';
 import '../../models/candle.dart';
+import '../../models/spot_quote.dart';
 import '../../services/market_data.dart';
 import '../../services/spot_gold_data.dart';
 import '../../widgets/bottom_trade_panel.dart';
@@ -40,6 +41,7 @@ class _ChartScreenState extends State<ChartScreen> {
   List<KLineEntity>? _datas;
   String? _error;
   StreamSubscription<Candle>? _sub;
+  StreamSubscription<SpotQuote>? _quoteSub;
   Timer? _throttle;
   bool _dirty = false;
 
@@ -69,13 +71,37 @@ class _ChartScreenState extends State<ChartScreen> {
   void initState() {
     super.initState();
     _load(_timeframe);
+    // The XAU spot ticker (Swissquote native / gold-api web) updates faster
+    // than the candle feed and is the price the trader actually watches —
+    // fold each tick into the forming candle so the chart moves with spot.
+    _quoteSub = MarketData.instance.quoteStream().listen(_onSpot);
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _quoteSub?.cancel();
     _throttle?.cancel();
     super.dispose();
+  }
+
+  /// Live spot → the last (forming) candle's close, extending its high/low.
+  /// Coalesced into the throttled rebuild like the candle-stream updates.
+  void _onSpot(SpotQuote q) {
+    if (!mounted || _candles.isEmpty) return;
+    final last = _candles.last;
+    final price = q.price;
+    if (price == last.close) return;
+    final updated = Candle(
+      time: last.time,
+      open: last.open,
+      high: price > last.high ? price : last.high,
+      low: price < last.low ? price : last.low,
+      close: price,
+      volume: last.volume,
+    );
+    _candles = [..._candles.sublist(0, _candles.length - 1), updated];
+    _dirty = true;
   }
 
   Future<void> _load(String tf) async {
@@ -111,7 +137,8 @@ class _ChartScreenState extends State<ChartScreen> {
     }
   }
 
-  /// Recompute chart entities and the momentum read-out from [_candles].
+  /// Recompute chart entities, the StochRSI read-out and the recent-
+  /// divergence pill from [_candles].
   void _rebuild() {
     final closes = [for (final c in _candles) c.close];
     final sr = StochRsi.compute(closes);

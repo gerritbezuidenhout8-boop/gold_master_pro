@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme/app_theme.dart';
+import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/shell/root_shell.dart';
 import 'services/app_settings.dart';
 import 'services/market_data.dart';
@@ -24,7 +25,9 @@ class GmpApp extends StatelessWidget {
       title: 'Gold Master Pro',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: const RootShell(),
+      home: AppSettings.instance.onboardingComplete.value
+          ? const RootShell()
+          : const OnboardingScreen(),
     );
   }
 }

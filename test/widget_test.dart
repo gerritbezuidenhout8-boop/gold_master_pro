@@ -7,6 +7,7 @@ import 'package:gold_master_pro/main.dart';
 import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/services/alert_store.dart';
+import 'package:gold_master_pro/services/app_settings.dart';
 import 'package:gold_master_pro/services/market_data.dart';
 import 'package:gold_master_pro/services/watchlist.dart';
 import 'package:gold_master_pro/state/alerts_controller.dart';
@@ -51,12 +52,15 @@ void main() {
     // Markets tab loads a watchlist at boot; avoid real network in tests.
     realWatchlist = Watchlist.fetch;
     Watchlist.fetch = () async => const [];
+    // These tests exercise the shell — skip the one-time onboarding gate.
+    AppSettings.instance.onboardingComplete.value = true;
   });
 
   tearDown(() {
     MarketData.instance = realMarketData;
     AlertsController.instance = realAlerts;
     Watchlist.fetch = realWatchlist;
+    AppSettings.instance.onboardingComplete.value = false;
   });
 
   testWidgets('boots to Home with six destinations', (tester) async {

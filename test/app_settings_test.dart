@@ -33,4 +33,20 @@ void main() {
     await AppSettings.instance.setAutoRefresh(0);
     expect(AppSettings.instance.autoRefreshSeconds.value, 5);
   });
+
+  test('setPriceAlerts persists and reloads', () async {
+    await AppSettings.instance.setPriceAlerts(false);
+    expect(AppSettings.instance.priceAlerts.value, isFalse);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('gmp-price-alerts'), isFalse);
+
+    // A fresh load reads it back.
+    AppSettings.instance.priceAlerts.value = true;
+    await AppSettings.instance.load();
+    expect(AppSettings.instance.priceAlerts.value, isFalse);
+
+    // Reset for other tests using the singleton.
+    await AppSettings.instance.setPriceAlerts(true);
+  });
 }

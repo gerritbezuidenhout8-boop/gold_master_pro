@@ -7,6 +7,7 @@ import 'package:gold_master_pro/core/theme/app_theme.dart';
 import 'package:gold_master_pro/models/alert_rule.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/services/alert_store.dart';
+import 'package:gold_master_pro/services/app_settings.dart';
 import 'package:gold_master_pro/state/alerts_controller.dart';
 import 'package:gold_master_pro/widgets/alert_watcher.dart';
 
@@ -25,8 +26,14 @@ SpotQuote _q(double p) =>
 void main() {
   late AlertsController real;
 
-  setUp(() => real = AlertsController.instance);
-  tearDown(() => AlertsController.instance = real);
+  setUp(() {
+    real = AlertsController.instance;
+    AppSettings.instance.priceAlerts.value = true; // order-independent
+  });
+  tearDown(() {
+    AlertsController.instance = real;
+    AppSettings.instance.priceAlerts.value = true;
+  });
 
   testWidgets('shows an in-app SnackBar when a watched level is crossed',
       (tester) async {
@@ -55,6 +62,37 @@ void main() {
     expect(AlertsController.instance.rules.single.isArmed, isFalse);
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.textContaining('crosses above'), findsOneWidget);
+
+    await quotes.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('does not fire when Price Alerts are turned off',
+      (tester) async {
+    final store = _MemStore(
+        [AlertRule(id: 'a', kind: AlertKind.priceAbove, threshold: 4050)]);
+    AlertsController.instance = AlertsController(store: store);
+    AppSettings.instance.priceAlerts.value = false;
+    final quotes = StreamController<SpotQuote>();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: AlertWatcher(
+        quotes: quotes.stream,
+        child: const Scaffold(body: SizedBox()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    quotes.add(_q(4040)); // seed below
+    await tester.pump();
+    quotes.add(_q(4060)); // would cross up, but alerts are off
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(SnackBar), findsNothing);
+    // The rule is never consumed, so it still fires once re-enabled.
+    expect(AlertsController.instance.rules.single.isArmed, isTrue);
 
     await quotes.close();
     await tester.pumpWidget(const SizedBox());

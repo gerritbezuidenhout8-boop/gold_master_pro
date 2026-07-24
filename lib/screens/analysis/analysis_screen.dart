@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../ai/gold_master_engine.dart';
+import '../../ai/trade_plan_engine.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/format.dart';
+import '../../indicators/adx.dart';
 import '../../indicators/candlestick_ai.dart';
 import '../../indicators/fibonacci.dart';
 import '../../indicators/key_levels.dart';
+import '../../indicators/macd.dart';
 import '../../indicators/rsi.dart';
 import '../../indicators/smma.dart';
 import '../../models/candle.dart';
@@ -41,6 +44,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   double? _lastClose;
   double? _smma21, _smma50, _smma200;
   double? _rsi, _stochK, _stochD;
+  MacdResult? _macd;
+  AdxResult? _adx;
+  TradePlan? _signal;
   DivergenceEvent? _recentDiv;
   DateTime? _computedAt;
   String? _error;
@@ -118,6 +124,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       _rsi = _lastNonNull(Rsi.compute(closes));
       _stochK = _lastNonNull(sr.k);
       _stochD = _lastNonNull(sr.d);
+      _macd = closes.isEmpty ? null : Macd.compute(closes);
+      _adx = candles.isEmpty ? null : Adx.latest(candles);
+      final tfAnalysis = _analyses[tf];
+      final levels = _levels;
+      _signal = (tfAnalysis != null && levels != null && candles.isNotEmpty)
+          ? TradePlanEngine.signal(
+              analysis: tfAnalysis, candles: candles, levels: levels)
+          : null;
       _recentDiv = divs.isNotEmpty && divs.last.index >= candles.length - 10
           ? divs.last
           : null;
@@ -180,9 +194,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           ),
         _multiTimeframeCard(),
         _trendCard(a),
+        _tradeSignalCard(),
         _keyLevelsCard(levels),
         _indicatorSummaryCard(a),
         _momentumCard(),
+        _adxCard(),
         if (fib != null) _fibCard(fib),
         _smmaCard(),
         _patternsCard(),
@@ -389,6 +405,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                     ? ('Bullish', AppTheme.bull)
                     : ('Bearish', AppTheme.bear);
     final stochBull = (k != null && d != null) ? k >= d : null;
+    final macd = _macd;
+    final macdV = macd?.latestMacd;
+    final sigV = macd?.latestSignal;
+    final macdBull = macd?.isBullish;
     return GmpCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,6 +442,23 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Expanded(
+                child: Text(
+                  'MACD (12/26/9)  ${macdV?.toStringAsFixed(2) ?? '—'} · '
+                  'signal ${sigV?.toStringAsFixed(2) ?? '—'}',
+                  style: const TextStyle(color: AppTheme.textPrimary),
+                ),
+              ),
+              if (macdBull != null)
+                GmpPill(
+                    text: macdBull ? 'Bullish' : 'Bearish',
+                    color: macdBull ? AppTheme.bull : AppTheme.bear),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
               const Text('RSI Divergence',
                   style: TextStyle(color: AppTheme.textPrimary)),
               _recentDiv == null
@@ -440,6 +477,146 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       ),
     );
   }
+
+  Widget _tradeSignalCard() {
+    final s = _signal;
+    if (s == null) {
+      return GmpCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            SectionLabel('Trade Signal'),
+            SizedBox(height: 8),
+            Text('Not enough data for a signal',
+                style: TextStyle(color: AppTheme.textSecondary)),
+          ],
+        ),
+      );
+    }
+    final buy = s.direction == TradeDirection.long;
+    final color = buy ? AppTheme.bull : AppTheme.bear;
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: SectionLabel('Trade Signal · $_selectedTf')),
+              GmpPill(
+                text: '${s.convictionLabel} conviction',
+                color: s.isHighConviction ? color : AppTheme.textSecondary),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceAlt,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color, width: 1.2),
+                ),
+                child: Text(s.action,
+                    style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        letterSpacing: 1)),
+              ),
+              const SizedBox(width: 12),
+              Text('at ${formatPrice(s.entry)}',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          KvRow(label: 'Take Profit 1', value: formatPrice(s.tp1)),
+          KvRow(label: 'Take Profit 2', value: formatPrice(s.tp2)),
+          KvRow(label: 'Stop Loss', value: formatPrice(s.stop)),
+          KvRow(
+              label: 'Risk / Reward',
+              value: '${s.rr1.toStringAsFixed(1)}R → ${s.rr2.toStringAsFixed(1)}R'),
+          const SizedBox(height: 8),
+          Text(
+            'Gold Master Score ${s.score}/100 · valid until '
+            '${formatUtcStamp(s.validUntil)} UTC',
+            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'The score sets the side and levels — education/analysis only, '
+              'not a recommendation to trade.',
+              style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _adxCard() {
+    final a = _adx;
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionLabel('Trend Strength · ADX · $_selectedTf'),
+          const SizedBox(height: 10),
+          if (a == null)
+            const Text('Not enough data',
+                style: TextStyle(color: AppTheme.textSecondary))
+          else ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('ADX (14)  ${a.adx.toStringAsFixed(1)}',
+                    style: const TextStyle(color: AppTheme.textPrimary)),
+                GmpPill(text: _adxStrength(a.adx), color: _adxColor(a)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '+DI ${a.plusDI.toStringAsFixed(1)} · '
+                  '−DI ${a.minusDI.toStringAsFixed(1)}',
+                  style: const TextStyle(color: AppTheme.textPrimary),
+                ),
+                GmpPill(
+                    text: a.isBullish ? 'Bullish' : 'Bearish',
+                    color: a.isBullish ? AppTheme.bull : AppTheme.bear),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('ADX ≥ 25 signals a trending market; below ~20 is '
+                  'choppy. +DI vs −DI gives direction.',
+                  style:
+                      TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _adxStrength(double adx) => adx >= 50
+      ? 'Very strong'
+      : adx >= 25
+          ? 'Trending'
+          : adx >= 20
+              ? 'Developing'
+              : 'Ranging';
+
+  Color _adxColor(AdxResult a) => a.isTrending
+      ? (a.isBullish ? AppTheme.bull : AppTheme.bear)
+      : AppTheme.textSecondary;
 
   double? _lastNonNull(List<double?> xs) {
     for (var i = xs.length - 1; i >= 0; i--) {
