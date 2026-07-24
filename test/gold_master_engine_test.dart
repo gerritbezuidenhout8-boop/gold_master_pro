@@ -85,6 +85,22 @@ void main() {
     expect(a.confidence, greaterThan(60));
   });
 
+  test('intraday label params rename the short-term component', () {
+    final def = GoldMasterEngine.analyze(h1: bullishH1(), d1: bullishD1());
+    expect(def.components.first.name, 'Hourly trend');
+
+    final m15 = GoldMasterEngine.analyze(
+      h1: bullishH1(),
+      d1: bullishD1(),
+      intradayName: 'M15 trend',
+      intradayWord: 'M15',
+    );
+    expect(m15.components.first.name, 'M15 trend');
+    expect(m15.components.first.reason, contains('M15'));
+    // Same candles ⇒ same score regardless of labels.
+    expect(m15.score, def.score);
+  });
+
   test('mirrored falling market scores bearish', () {
     final a = GoldMasterEngine.analyze(
       h1: _mirror(bullishH1(), 200),

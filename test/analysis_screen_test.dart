@@ -80,17 +80,15 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    // Section labels are uppercased; cards are virtualized so scroll to each.
-    expect(find.text('TREND ANALYSIS'), findsOneWidget);
+    // Multi-timeframe strip: one bias tile per 5m→1h timeframe, H1 default.
+    expect(find.text('MULTI-TIMEFRAME (5M → 1H)'), findsOneWidget);
+    expect(find.text('M5'), findsWidgets);
+    expect(find.text('TREND ANALYSIS · H1'), findsOneWidget);
 
-    await tester.scrollUntilVisible(
-        find.text('KEY LEVELS (UTC DAYS)'), 250);
+    await tester.scrollUntilVisible(find.text('KEY LEVELS (UTC DAYS)'), 250);
     expect(find.text('Prev Week High'), findsOneWidget);
     expect(find.text('119.00'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('200.00'), 250); // ATH spike
-
-    await tester.scrollUntilVisible(find.text('INDICATOR SUMMARY'), 250);
-    expect(find.text('AUTO FIBONACCI · H1'), findsNothing); // not yet reached
 
     await tester.scrollUntilVisible(find.text('AUTO FIBONACCI · H1'), 250);
     expect(find.text('61.8%'), findsOneWidget);
@@ -98,8 +96,25 @@ void main() {
     await tester.scrollUntilVisible(find.text('MOVING AVERAGES · H1'), 250);
     expect(find.textContaining('price'), findsWidgets); // above/below note
 
-    await tester.scrollUntilVisible(find.text('Bullish Engulfing').first, 250);
+    await tester.scrollUntilVisible(
+        find.text('CANDLESTICK DETECTION · H1'), 250);
     expect(find.text('Bullish Engulfing'), findsWidgets);
+  });
+
+  testWidgets('selecting a lower timeframe re-labels the detail cards',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: AnalysisScreen()));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('TREND ANALYSIS · H1'), findsOneWidget);
+
+    await tester.tap(find.text('M5').first); // tap the M5 consensus tile
+    await tester.pump();
+
+    expect(find.text('TREND ANALYSIS · M5'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('MOVING AVERAGES · M5'), 250);
+    expect(find.text('MOVING AVERAGES · M5'), findsOneWidget);
   });
 
   testWidgets('theme variant renders without errors', (tester) async {

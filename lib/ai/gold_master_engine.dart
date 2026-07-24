@@ -76,18 +76,23 @@ class GoldMasterEngine {
   GoldMasterEngine._();
 
   /// [h1] drives short-term signals, [d1] the higher-timeframe trend and
-  /// key levels; the last H1 close is "current price".
+  /// key levels; the last [h1] close is "current price". [intradayName]/
+  /// [intradayWord] label the short-term component so the same engine can
+  /// run on any intraday timeframe (e.g. 'M15 trend' / 'M15') — Home keeps
+  /// the hourly defaults.
   static GoldMasterAnalysis analyze({
     required List<Candle> h1,
     required List<Candle> d1,
     DateTime? now,
+    String intradayName = 'Hourly trend',
+    String intradayWord = 'hourly',
   }) {
     if (h1.isEmpty || d1.isEmpty) {
       throw ArgumentError('h1 and d1 candles must not be empty');
     }
     final price = h1.last.close;
     final components = <ScoreComponent>[
-      _smmaTrend('Hourly trend', 'hourly', h1, price, weight: 30),
+      _smmaTrend(intradayName, intradayWord, h1, price, weight: 30),
       _smmaTrend('Daily trend', 'daily', d1, price, weight: 20),
       _keyLevelPosition(d1, price),
       _fibPosition(h1, price),

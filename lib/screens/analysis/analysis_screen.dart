@@ -8,13 +8,15 @@ import '../../indicators/fibonacci.dart';
 import '../../indicators/key_levels.dart';
 import '../../indicators/rsi.dart';
 import '../../indicators/smma.dart';
+import '../../models/candle.dart';
 import '../../services/market_data.dart';
 import '../../widgets/gmp_card.dart';
 import '../../widgets/section_card.dart' show KvRow;
 
-/// Deep-dive analysis view (spec: Analysis Screen): trend, key levels,
-/// an indicator summary from the engine's real signals, auto-Fibonacci,
-/// SMMA read-out and candlestick detections — all from live candles.
+/// Deep-dive analysis (spec: Analysis Screen). Runs the full engine on
+/// each intraday timeframe from 5m to 1h — a tappable multi-timeframe
+/// consensus strip up top, with the detail cards driven by the selected
+/// timeframe. Key levels stay daily (they are timeframe-independent).
 class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
 
@@ -23,6 +25,15 @@ class AnalysisScreen extends StatefulWidget {
 }
 
 class _AnalysisScreenState extends State<AnalysisScreen> {
+  /// The 5m → 1h analysis range.
+  static const List<String> _tfs = ['M5', 'M15', 'M30', 'H1'];
+
+  List<Candle> _daily = const [];
+  final Map<String, List<Candle>> _intraday = {};
+  final Map<String, GoldMasterAnalysis> _analyses = {};
+  String _selectedTf = 'H1';
+
+  // Derived values for the currently selected timeframe.
   GoldMasterAnalysis? _analysis;
   KeyLevelsResult? _levels;
   AutoFibResult? _fib;
@@ -47,40 +58,31 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       _error = null;
     });
     try {
-      final daily = await MarketData.instance.fetchCandles('D1');
-      final h1 = await MarketData.instance.fetchCandles('H1');
+      final results = await Future.wait([
+        MarketData.instance.fetchCandles('D1'),
+        for (final tf in _tfs) MarketData.instance.fetchCandles(tf),
+      ]);
       if (!mounted) return;
 
-      final closes = [for (final c in h1) c.close];
-      final found = <(DateTime, CandlePattern)>[];
-      final start = h1.length > 20 ? h1.length - 20 : 1;
-      for (var i = start; i < h1.length; i++) {
-        for (final p in CandlestickDetector.detect(h1.sublist(0, i + 1))) {
-          found.add((h1[i].time, p));
+      _daily = results[0];
+      _intraday.clear();
+      _analyses.clear();
+      for (var i = 0; i < _tfs.length; i++) {
+        final tf = _tfs[i];
+        final candles = results[i + 1];
+        _intraday[tf] = candles;
+        if (candles.isNotEmpty && _daily.isNotEmpty) {
+          _analyses[tf] = GoldMasterEngine.analyze(
+            h1: candles,
+            d1: _daily,
+            intradayName: '$tf trend',
+            intradayWord: tf,
+          );
         }
       }
-
-      setState(() {
-        _analysis = GoldMasterEngine.analyze(h1: h1, d1: daily);
-        _levels = KeyLevels.compute(daily);
-        _fib = h1.isEmpty ? null : Fibonacci.auto(h1);
-        _patterns = found.reversed.take(6).toList();
-        _lastClose = closes.isEmpty ? null : closes.last;
-        _smma21 = closes.length >= 21 ? Smma.compute(closes, 21).last : null;
-        _smma50 = closes.length >= 50 ? Smma.compute(closes, 50).last : null;
-        _smma200 =
-            closes.length >= 200 ? Smma.compute(closes, 200).last : null;
-        _rsi = _lastNonNull(Rsi.compute(closes));
-        final sr = StochRsi.compute(closes);
-        _stochK = _lastNonNull(sr.k);
-        _stochD = _lastNonNull(sr.d);
-        final divs = RsiDivergence.detect(h1);
-        _recentDiv = divs.isNotEmpty && divs.last.index >= h1.length - 10
-            ? divs.last
-            : null;
-        _computedAt = DateTime.now().toUtc();
-        _loading = false;
-      });
+      _levels = KeyLevels.compute(_daily);
+      _computedAt = DateTime.now().toUtc();
+      _applyTf(_selectedTf);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -88,6 +90,39 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Recomputes the detail-card values for [tf] from already-fetched
+  /// candles (no network) and selects it.
+  void _applyTf(String tf) {
+    final candles = _intraday[tf] ?? const [];
+    final closes = [for (final c in candles) c.close];
+    final found = <(DateTime, CandlePattern)>[];
+    final start = candles.length > 20 ? candles.length - 20 : 1;
+    for (var i = start; i < candles.length; i++) {
+      for (final p in CandlestickDetector.detect(candles.sublist(0, i + 1))) {
+        found.add((candles[i].time, p));
+      }
+    }
+    final sr = StochRsi.compute(closes);
+    final divs = RsiDivergence.detect(candles);
+    setState(() {
+      _selectedTf = tf;
+      _analysis = _analyses[tf];
+      _fib = candles.isEmpty ? null : Fibonacci.auto(candles);
+      _patterns = found.reversed.take(6).toList();
+      _lastClose = closes.isEmpty ? null : closes.last;
+      _smma21 = closes.length >= 21 ? Smma.compute(closes, 21).last : null;
+      _smma50 = closes.length >= 50 ? Smma.compute(closes, 50).last : null;
+      _smma200 = closes.length >= 200 ? Smma.compute(closes, 200).last : null;
+      _rsi = _lastNonNull(Rsi.compute(closes));
+      _stochK = _lastNonNull(sr.k);
+      _stochD = _lastNonNull(sr.d);
+      _recentDiv = divs.isNotEmpty && divs.last.index >= candles.length - 10
+          ? divs.last
+          : null;
+      _loading = false;
+    });
   }
 
   Color _biasColor(MarketBias b) => switch (b) {
@@ -136,11 +171,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
             child: Text(
-              'Computed ${formatUtcStamp(_computedAt!)} UTC · D1 + H1 · PAXG',
+              'Computed ${formatUtcStamp(_computedAt!)} UTC · '
+              'D1 + $_selectedTf',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+              style:
+                  const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
           ),
+        _multiTimeframeCard(),
         _trendCard(a),
         _keyLevelsCard(levels),
         _indicatorSummaryCard(a),
@@ -152,6 +190,80 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     );
   }
 
+  Widget _multiTimeframeCard() {
+    final analyses = _analyses.values;
+    final bull =
+        analyses.where((a) => a.bias == MarketBias.bullish).length;
+    final bear =
+        analyses.where((a) => a.bias == MarketBias.bearish).length;
+    final neutral = analyses.length - bull - bear;
+    return GmpCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionLabel('Multi-Timeframe (5m → 1h)'),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final tf in _tfs)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: _mtfTile(tf),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Consensus: $bull bullish · $neutral neutral · $bear bearish · '
+            'tap a timeframe to drill in',
+            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mtfTile(String tf) {
+    final a = _analyses[tf];
+    final selected = tf == _selectedTf;
+    final color = a == null ? AppTheme.textSecondary : _biasColor(a.bias);
+    return GestureDetector(
+      onTap: () => _applyTf(tf),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.surfaceAlt : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? AppTheme.gold : AppTheme.hairline,
+            width: selected ? 1.4 : 0.5,
+          ),
+        ),
+        child: Column(
+          children: [
+            Text(tf,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary)),
+            const SizedBox(height: 3),
+            Text(
+              a?.bias.label.toUpperCase() ?? '—',
+              style: TextStyle(
+                  fontSize: 9, fontWeight: FontWeight.w700, color: color),
+            ),
+            Text(
+              a == null ? '—' : '${a.score}',
+              style: TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w700, color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _trendCard(GoldMasterAnalysis a) {
     final color = _biasColor(a.bias);
     final strength =
@@ -160,7 +272,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Trend Analysis'),
+          SectionLabel('Trend Analysis · $_selectedTf'),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -233,7 +345,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Indicator Summary'),
+          SectionLabel('Indicator Summary · $_selectedTf'),
           const SizedBox(height: 10),
           for (final c in a.components)
             Padding(
@@ -281,7 +393,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Momentum · H1'),
+          SectionLabel('Momentum · $_selectedTf'),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -342,7 +454,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Auto Fibonacci · H1'),
+          SectionLabel('Auto Fibonacci · $_selectedTf'),
           const SizedBox(height: 8),
           Text(
             '${fib.isUpLeg ? 'Up' : 'Down'} leg · '
@@ -373,7 +485,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Moving Averages · H1'),
+          SectionLabel('Moving Averages · $_selectedTf'),
           const SizedBox(height: 8),
           KvRow(label: 'SMMA 21', value: _smmaText(_smma21)),
           KvRow(label: 'SMMA 50', value: _smmaText(_smma50)),
@@ -388,7 +500,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionLabel('Candlestick Detection · H1'),
+          SectionLabel('Candlestick Detection · $_selectedTf'),
           const SizedBox(height: 8),
           if (_patterns.isEmpty)
             const Text('No patterns detected',
@@ -440,7 +552,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text('${formatUtcStamp(t)} UTC',
-              style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+              style:
+                  const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
           Text(p.label, style: TextStyle(color: color)),
         ],
       ),
