@@ -51,8 +51,9 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   a Mozilla User-Agent; ~0.1% from spot; **no 4h interval → H4 aggregated
   from H1** via `aggregateCandles`); ticker/alerts from **Swissquote**
   public XAU/USD bbo (mid of first spread profile) with gold-api.com
-  fallback. **`kIsWeb` ⇒ everything falls back to Binance** (Yahoo /
-  Swissquote block CORS). Yahoo delisted `XAUUSD=X` — GC=F is the only
+  fallback. **On web (Yahoo / Swissquote block CORS): candles fall back to
+  Binance PAXG, but live quotes poll gold-api.com's real XAU spot** (not
+  the PAXG ticker) — added v1.0.9. Yahoo delisted `XAUUSD=X` — GC=F is the only
   gold symbol. Chart caption reads `SpotGoldMarketData.candleSource`.
   True spot XAUUSD *candles* are paid-only; this is the free ceiling.
 - `indicators/` — pure, tested Dart: `Smma`, `Rsi`/`StochRsi`/

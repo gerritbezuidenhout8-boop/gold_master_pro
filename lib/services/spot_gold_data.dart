@@ -12,8 +12,10 @@ import 'market_data.dart';
 ///  - candles: COMEX gold futures (GC=F) via Yahoo's chart API — within a
 ///    few dollars of spot; unofficial, so Binance PAXG is the automatic
 ///    fallback (and the only path on web, where Yahoo blocks CORS)
-///  - live quotes: XAU/USD bank spot polled from Swissquote, falling back
-///    to gold-api.com, then to the PAXG stream
+///  - live quotes: XAU/USD bank spot polled from Swissquote (native),
+///    falling back to gold-api.com, then to the PAXG stream. On web, where
+///    Swissquote blocks CORS, gold-api.com's real XAU spot is polled
+///    directly instead of the Binance PAXG ticker.
 class SpotGoldMarketData implements MarketData {
   SpotGoldMarketData({BinanceMarketData? fallback})
       : _binance = fallback ?? BinanceMarketData();
@@ -97,7 +99,13 @@ class SpotGoldMarketData implements MarketData {
 
   @override
   Stream<SpotQuote> quoteStream() {
-    if (kIsWeb) return _binance.quoteStream();
+    // Web can't reach Swissquote (it sends no CORS header), so poll
+    // gold-api.com's real XAU/USD spot instead of the Binance PAXG ticker.
+    // Single price only (no bid/ask) — the trade panel already falls back
+    // to a single-price display on web.
+    if (kIsWeb) {
+      return _poll<SpotQuote>(const Duration(seconds: 4), fetchXauSpot);
+    }
     return _poll<SpotQuote>(const Duration(seconds: 4), () async {
       try {
         final res = await http
