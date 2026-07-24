@@ -11,6 +11,7 @@ import '../../widgets/live_price_card.dart';
 import '../../widgets/score_gauge.dart';
 import '../../widgets/stat_tile.dart';
 import '../settings/settings_screen.dart';
+import '../trade_plan/trade_plan_screen.dart';
 
 /// Home dashboard (spec: Home Screen) — live price header, the Gold
 /// Master Score gauge, evidence stat tiles, an AI recommendation and the
@@ -268,6 +269,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
     };
     return GmpCard(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const TradePlanScreen()),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -288,6 +292,18 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(text,
               style: const TextStyle(
                   fontSize: 13, color: AppTheme.textSecondary, height: 1.4)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: const [
+              Text('View trade plan',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.gold)),
+              Icon(Icons.chevron_right, size: 18, color: AppTheme.gold),
+            ],
+          ),
         ],
       ),
     );

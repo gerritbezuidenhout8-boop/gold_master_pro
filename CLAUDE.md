@@ -63,7 +63,16 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
 - `ai/gold_master_engine.dart` — deterministic weighted rubric (5
   components → score 0-100, bias at 60/40, confidence, clarity, template
   narrative). No Flutter imports, no network. Any future LLM layer
-  narrates computed numbers, never invents them.
+  narrates computed numbers, never invents them. `analyze()` takes
+  `intradayName`/`intradayWord` so it can run on any intraday TF (Analysis
+  screen runs it across M5/M15/M30/H1; Home keeps hourly defaults).
+- `ai/trade_plan_engine.dart` — turns a high-conviction score into a
+  concrete plan: LONG at score ≥ 80, SHORT at ≤ 20, else null (no signal).
+  Entry near price, stop = recent swing ± buffer clamped to [0.8,3]×ATR
+  (`indicators/atr.dart`, Wilder), TP1/TP2 = nearest key levels beyond
+  entry with R-multiple fallback. `screens/trade_plan/` renders it
+  (mockup screen 8); reached by tapping Home's AI Recommendation card.
+  Education/analysis only — disclaimer on the screen.
 - **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
   (`assets/tv/` bundled standalone JS + chart.html; `widgets/chart_widget.dart`
   WebView + `tvChartPayload` serializer; refit only on timeframe change;
