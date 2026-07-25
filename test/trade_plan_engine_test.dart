@@ -90,51 +90,25 @@ void main() {
     expect(plan, isNull);
   });
 
-  test('signal() always returns a directional plan from the score', () {
-    final bullAnalysis =
+  test('an issued plan is always high conviction', () {
+    // With the 80/20 gate, anything that clears it is >= 60 conviction.
+    final analysis =
         GoldMasterEngine.analyze(h1: bullishH1(), d1: bullishD1());
-    final bull = TradePlanEngine.signal(
-      analysis: bullAnalysis,
+    final plan = TradePlanEngine.generate(
+      analysis: analysis,
       candles: bullishH1(),
       levels: KeyLevels.compute(bullishD1()),
     )!;
-    expect(bull.direction, TradeDirection.long);
-    expect(bull.action, 'BUY');
-    expect(bull.isHighConviction, isTrue); // strong fixture
-    expect(bull.stop, lessThan(bull.entry));
-    expect(bull.entry, lessThan(bull.tp1));
-
-    final bearH1 = _mirror(bullishH1(), 200);
-    final bearD1 = _mirror(bullishD1(), 200);
-    final bear = TradePlanEngine.signal(
-      analysis: GoldMasterEngine.analyze(h1: bearH1, d1: bearD1),
-      candles: bearH1,
-      levels: KeyLevels.compute(bearD1),
-    )!;
-    expect(bear.direction, TradeDirection.short);
-    expect(bear.action, 'SELL');
+    expect(plan.isHighConviction, isTrue);
+    expect(plan.convictionLabel, 'High');
+    expect(plan.stop, lessThan(plan.entry));
+    expect(plan.entry, lessThan(plan.tp1));
   });
 
-  test('signal() is a low-conviction long at a neutral score', () {
-    final h1 = _flat(60);
-    final d1 = _flat(30, daily: true);
-    final analysis = GoldMasterEngine.analyze(h1: h1, d1: d1);
-    expect(analysis.score, 50);
-    final plan = TradePlanEngine.signal(
-      analysis: analysis,
-      candles: h1,
-      levels: KeyLevels.compute(d1),
-    )!;
-    expect(plan.direction, TradeDirection.long); // >= 50 rule
-    expect(plan.conviction, 0);
-    expect(plan.convictionLabel, 'Low');
-    expect(plan.isHighConviction, isFalse);
-  });
-
-  test('signal() returns null without candles', () {
+  test('returns null without candles', () {
     final analysis = GoldMasterEngine.analyze(h1: bullishH1(), d1: bullishD1());
     expect(
-      TradePlanEngine.signal(
+      TradePlanEngine.generate(
         analysis: analysis,
         candles: const [],
         levels: KeyLevels.compute(bullishD1()),

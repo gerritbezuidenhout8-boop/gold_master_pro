@@ -7,6 +7,8 @@ import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/screens/analysis/analysis_screen.dart';
 import 'package:gold_master_pro/services/market_data.dart';
 
+import 'gold_master_engine_test.dart' show bullishH1, bullishD1;
+
 class _FakeMarketData implements MarketData {
   @override
   Future<List<Candle>> fetchCandles(String timeframe) async {
@@ -51,6 +53,22 @@ class _FakeMarketData implements MarketData {
       ),
     ];
   }
+
+  @override
+  Stream<Candle> candleStream(String timeframe) => const Stream.empty();
+
+  @override
+  Stream<SpotQuote> quoteStream() => const Stream.empty();
+
+  @override
+  Future<SpotQuote?> fetchXauSpot() async => null;
+}
+
+/// Strongly bullish market — clears the >= 80 high-conviction gate.
+class _BullishFake implements MarketData {
+  @override
+  Future<List<Candle>> fetchCandles(String timeframe) async =>
+      timeframe == 'D1' ? bullishD1() : bullishH1();
 
   @override
   Stream<Candle> candleStream(String timeframe) => const Stream.empty();
@@ -118,14 +136,27 @@ void main() {
     expect(find.text('MOVING AVERAGES · M5'), findsOneWidget);
   });
 
-  testWidgets('shows an AI-score trade signal with entry, TP and SL',
-      (tester) async {
+  testWidgets('gates the trade signal below high conviction', (tester) async {
+    // This fixture is mildly bullish — not the >= 80 the gate demands, so
+    // the card reports no signal rather than inventing a weak one.
     await tester.pumpWidget(const MaterialApp(home: AnalysisScreen()));
     await tester.pump();
     await tester.pump();
 
     await tester.scrollUntilVisible(find.text('TRADE SIGNAL · H1'), 250);
-    // Bullish fixture (uptrend + bullish engulfing) → a BUY plan.
+    expect(find.textContaining('No high-conviction signal'), findsOneWidget);
+    expect(find.text('BUY'), findsNothing);
+  });
+
+  testWidgets('shows an AI-score trade signal with entry, TP and SL',
+      (tester) async {
+    MarketData.instance = _BullishFake();
+    await tester.pumpWidget(const MaterialApp(home: AnalysisScreen()));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.scrollUntilVisible(find.text('TRADE SIGNAL · H1'), 250);
+    // Strong bullish fixture clears the 80 gate → a BUY plan.
     expect(find.text('BUY'), findsOneWidget);
     expect(find.text('Take Profit 1'), findsOneWidget);
     expect(find.text('Take Profit 2'), findsOneWidget);

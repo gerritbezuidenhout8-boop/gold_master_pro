@@ -128,8 +128,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       _adx = candles.isEmpty ? null : Adx.latest(candles);
       final tfAnalysis = _analyses[tf];
       final levels = _levels;
+      // Same high-conviction gate as the Trade Plan screen: no signal in
+      // the neutral middle.
       _signal = (tfAnalysis != null && levels != null && candles.isNotEmpty)
-          ? TradePlanEngine.signal(
+          ? TradePlanEngine.generate(
               analysis: tfAnalysis, candles: candles, levels: levels)
           : null;
       _recentDiv = divs.isNotEmpty && divs.last.index >= candles.length - 10
@@ -484,11 +486,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       return GmpCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            SectionLabel('Trade Signal'),
-            SizedBox(height: 8),
-            Text('Not enough data for a signal',
-                style: TextStyle(color: AppTheme.textSecondary)),
+          children: [
+            SectionLabel('Trade Signal · $_selectedTf'),
+            const SizedBox(height: 8),
+            const Text(
+              'No high-conviction signal — the score needs ≥ 80 (long) or '
+              '≤ 20 (short) on this timeframe.',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ],
         ),
       );

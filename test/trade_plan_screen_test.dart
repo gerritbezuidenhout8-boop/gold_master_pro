@@ -4,8 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gold_master_pro/core/theme/app_theme.dart';
 import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
+import 'package:gold_master_pro/models/trade_signal.dart';
 import 'package:gold_master_pro/screens/trade_plan/trade_plan_screen.dart';
 import 'package:gold_master_pro/services/market_data.dart';
+import 'package:gold_master_pro/services/signal_store.dart';
+import 'package:gold_master_pro/state/signal_controller.dart';
 
 import 'gold_master_engine_test.dart' show bullishH1, bullishD1;
 
@@ -28,6 +31,14 @@ class _Fake implements MarketData {
   Future<SpotQuote?> fetchXauSpot() async => null;
 }
 
+class _MemStore implements SignalStore {
+  List<TradeSignal> data = [];
+  @override
+  Future<List<TradeSignal>> load() async => List.of(data);
+  @override
+  Future<void> save(List<TradeSignal> s) async => data = List.of(s);
+}
+
 List<Candle> _flat(int n, {bool daily = false}) => [
       for (var i = 0; i < n; i++)
         Candle(
@@ -43,39 +54,99 @@ List<Candle> _flat(int n, {bool daily = false}) => [
 
 void main() {
   late MarketData real;
+  late SignalController realSignals;
 
-  setUp(() => real = MarketData.instance);
-  tearDown(() => MarketData.instance = real);
+  setUp(() {
+    real = MarketData.instance;
+    realSignals = SignalController.instance;
+    SignalController.instance = SignalController(store: _MemStore());
+  });
+  tearDown(() {
+    MarketData.instance = real;
+    SignalController.instance = realSignals;
+  });
 
-  testWidgets('strong bullish score shows a BUY trade plan', (tester) async {
+  testWidgets('issues one BUY signal with entry, TP and SL', (tester) async {
     MarketData.instance = _Fake(bullishH1(), bullishD1());
     await tester.pumpWidget(
         MaterialApp(theme: AppTheme.dark, home: const TradePlanScreen()));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('BUY SETUP'), findsOneWidget);
-    expect(find.text('Entry Zone'), findsOneWidget);
-    expect(find.text('Stop Loss'), findsOneWidget);
-    expect(find.text('Take Profit 1'), findsOneWidget);
-    expect(find.text('Take Profit 2'), findsOneWidget);
-    expect(find.text('RISK / REWARD'), findsOneWidget);
+    expect(find.text('BUY SIGNAL'), findsOneWidget);
+    // The plain-language instruction the plan is meant to give.
+    expect(find.textContaining('Take buy trade at'), findsOneWidget);
+    expect(find.textContaining('TP at'), findsOneWidget);
+    expect(find.textContaining('SL at'), findsOneWidget);
+    expect(find.text('Live Tracking'.toUpperCase()), findsOneWidget);
 
-    // Disclaimer sits at the bottom of the list — scroll to confirm it.
-    await tester.scrollUntilVisible(
-        find.textContaining('not financial advice'), 250);
-    expect(find.textContaining('not financial advice'), findsOneWidget);
+    final active = SignalController.instance.active!;
+    expect(active.isLong, isTrue);
+    expect(active.plan.tp1, greaterThan(active.plan.entry));
+    expect(active.plan.stop, lessThan(active.plan.entry));
+
+    await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('neutral score shows the no-signal state', (tester) async {
+  testWidgets('a neutral score stays flat and issues nothing', (tester) async {
     MarketData.instance = _Fake(_flat(60), _flat(30, daily: true));
     await tester.pumpWidget(
         MaterialApp(theme: AppTheme.dark, home: const TradePlanScreen()));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(find.text('NO HIGH-CONVICTION SIGNAL'), findsOneWidget);
-    expect(find.text('BUY SETUP'), findsNothing);
+    expect(find.text('BUY SIGNAL'), findsNothing);
     expect(find.textContaining('≥ 80'), findsOneWidget);
+    // Flat is a real state: nothing was opened.
+    expect(SignalController.instance.active, isNull);
+    expect(SignalController.instance.signals, isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('re-analysing does not replace the running signal',
+      (tester) async {
+    MarketData.instance = _Fake(bullishH1(), bullishD1());
+    await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.dark, home: const TradePlanScreen()));
+    await tester.pumpAndSettle();
+
+    final first = SignalController.instance.active!;
+    expect(SignalController.instance.signals, hasLength(1));
+
+    await tester.tap(find.byTooltip('Re-analyse'));
+    await tester.pumpAndSettle();
+
+    // Still exactly one, and still the same trade.
+    expect(SignalController.instance.signals, hasLength(1));
+    expect(SignalController.instance.active!.id, first.id);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a closed signal frees the next one and shows in history',
+      (tester) async {
+    MarketData.instance = _Fake(bullishH1(), bullishD1());
+    await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.dark, home: const TradePlanScreen()));
+    await tester.pumpAndSettle();
+
+    final signals = SignalController.instance;
+    final first = signals.active!;
+    // Drive price to the take-profit — the trade closes.
+    signals.onPrice(first.plan.tp1 + 1);
+    await tester.pumpAndSettle();
+    expect(signals.active, isNull);
+    expect(signals.history, hasLength(1));
+
+    // Re-analysing now issues the next trade.
+    await tester.tap(find.byTooltip('Re-analyse'));
+    await tester.pumpAndSettle();
+    expect(signals.active, isNotNull);
+    expect(signals.active!.id, isNot(first.id));
+
+    await tester.scrollUntilVisible(find.text('SIGNAL HISTORY'), 250);
+    expect(find.text('SIGNAL HISTORY'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
   });
 }

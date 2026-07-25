@@ -26,7 +26,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; ~146 tests (v1.1.0) |
+| `flutter analyze` / `flutter test` | keep both green; ~161 tests (v1.1.1) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -79,11 +79,14 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   (`indicators/atr.dart`, Wilder), TP1/TP2 = nearest key levels beyond
   entry with R-multiple fallback. `screens/trade_plan/` renders it
   (mockup screen 8); reached by tapping Home's AI Recommendation card.
-  Education/analysis only — disclaimer on the screen. **v1.1.0 `signal()`
-  always returns a directional plan (long if score ≥ 50 else short) with
-  `conviction`/`convictionLabel`/`isHighConviction`; the Analysis "Trade
-  Signal" card uses it (entry/TP1/TP2/SL/R:R). `generate()` (80/20 gate)
-  still backs the Trade Plan screen; both share `_build()`.**
+  Education/analysis only — disclaimer on the screen. **`generate()` is the
+  only entry point: the 80/20 gate is deliberate and flat is a valid state
+  — never add an always-directional variant (v1.1.0 shipped one, and it was
+  removed in v1.1.1 at the owner's request). Both the Trade Plan screen and
+  the Analysis "Trade Signal" card use it and show a "no high-conviction
+  signal" state in the middle.** `TradePlan` also carries
+  `conviction`/`convictionLabel`/`isHighConviction` and `toMap`/`fromMap`
+  (a signal persists its plan by value).
 - **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
   (`assets/tv/` bundled standalone JS + chart.html; `widgets/chart_widget.dart`
   WebView + `tvChartPayload` serializer; refit only on timeframe change;
@@ -106,10 +109,27 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
 - `state/alerts_controller.dart` — app-wide singleton ChangeNotifier
   (deliberately no Riverpod). `widgets/alert_watcher.dart` wraps the
   shell, evaluates `AlertEngine.fires` crossings, one-shot until re-armed.
+- **Signal lifecycle — one trade at a time.** `state/signal_controller.dart`
+  (2nd ChangeNotifier singleton) owns it: `canIssue` is the gate, so a new
+  plan opens only when nothing is running, and the open trade closes *only*
+  at its take-profit or stop — no expiry, and re-analysing never replaces
+  it. `ai/signal_engine.dart` is the pure rule, applied two ways:
+  `resolve()` on a live tick and `resolveFromCandles()` replayed on launch
+  so a trade that completed while the app was shut still settles. Exits
+  book **at the level** (clean +rr1 / −1R); a bar touching **both** levels
+  counts as the stop, never flattering the record. `models/trade_signal.dart`
+  stores the plan **by value** so a closed signal keeps the levels it was
+  judged on. Persisted via `services/signal_store.dart`
+  (`gmp-signals-v1`). `AlertWatcher` feeds prices to both controllers —
+  signal resolution is deliberately **not** gated by the price-alerts
+  toggle (it is state, not a notification). TP1 closes the trade; TP2 is
+  displayed as an untracked runner.
 - `services/journal_store.dart` / `alert_store.dart` / `app_settings.dart`
   — local-first via shared_preferences, swappable `.instance` seams.
   Firebase/cloud runbooks: `docs/firebase_setup.md`,
-  `docs/alerts_backend.md` (Cloudflare Worker skeleton).
+  `docs/alerts_backend.md` (Cloudflare Worker skeleton). Open environment
+  traps (browser-pane screenshots, cross-origin request logging, stale
+  `chart.html`): `docs/known_issues.md`.
 - Theme `core/theme/app_theme.dart`: black `#0A0A0B` + gold `#E3B84C`
   system; reusable `GmpCard`/`SectionLabel`/`GmpPill`/`StatTile`/
   `GoldButton`/`ScoreGauge`. Branding assets `assets/branding/` from the

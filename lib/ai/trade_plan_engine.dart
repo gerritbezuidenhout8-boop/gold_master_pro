@@ -57,6 +57,44 @@ class TradePlan {
 
   /// A high-conviction setup (score ≥ 80 or ≤ 20) — what [generate] gates on.
   bool get isHighConviction => conviction >= 60;
+
+  Map<String, dynamic> toMap() => {
+        'direction': direction.name,
+        'score': score,
+        'confidence': confidence,
+        'entry': entry,
+        'entryLow': entryLow,
+        'entryHigh': entryHigh,
+        'stop': stop,
+        'tp1': tp1,
+        'tp2': tp2,
+        'risk': risk,
+        'rr1': rr1,
+        'rr2': rr2,
+        'validUntil': validUntil.toIso8601String(),
+        'rationale': rationale,
+      };
+
+  static TradePlan fromMap(Map<String, dynamic> m) => TradePlan(
+        direction: m['direction'] == 'short'
+            ? TradeDirection.short
+            : TradeDirection.long,
+        score: (m['score'] as num).toInt(),
+        confidence: (m['confidence'] as num).toInt(),
+        entry: (m['entry'] as num).toDouble(),
+        entryLow: (m['entryLow'] as num).toDouble(),
+        entryHigh: (m['entryHigh'] as num).toDouble(),
+        stop: (m['stop'] as num).toDouble(),
+        tp1: (m['tp1'] as num).toDouble(),
+        tp2: (m['tp2'] as num).toDouble(),
+        risk: (m['risk'] as num).toDouble(),
+        rr1: (m['rr1'] as num).toDouble(),
+        rr2: (m['rr2'] as num).toDouble(),
+        validUntil:
+            DateTime.tryParse(m['validUntil'] as String? ?? '')?.toUtc() ??
+                DateTime.now().toUtc(),
+        rationale: [for (final r in (m['rationale'] as List? ?? [])) '$r'],
+      );
 }
 
 /// Turns a high-conviction Gold Master Score into an entry / stop /
@@ -82,25 +120,6 @@ class TradePlanEngine {
         candles: candles,
         levels: levels,
         long: long,
-        now: now);
-  }
-
-  /// Always returns a directional plan: the Gold Master Score decides the
-  /// side (buy at ≥ 50, sell below), and computes the entry, stop and
-  /// targets. Use where analysis should always show a read — [TradePlan
-  /// .conviction] communicates how strong it is. Null only with no candles.
-  static TradePlan? signal({
-    required GoldMasterAnalysis analysis,
-    required List<Candle> candles,
-    required KeyLevelsResult levels,
-    DateTime? now,
-  }) {
-    if (candles.isEmpty) return null;
-    return _build(
-        analysis: analysis,
-        candles: candles,
-        levels: levels,
-        long: analysis.score >= 50,
         now: now);
   }
 
