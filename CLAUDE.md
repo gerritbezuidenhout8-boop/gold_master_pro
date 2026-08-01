@@ -32,20 +32,13 @@ signals as recommendations to trade.
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
 | `dart run flutter_launcher_icons` | regenerate launcher icons |
 
-**Release = tag push:** bump `version:` in pubspec **and
-`AppConstants.appVersion`**, commit, push, then
-`git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml`
-builds and attaches `app-release.apk` + `gmp-web.zip` (~6 min). Download
-URL pattern: `releases/download/vX.Y.Z/app-release.apk`. Verify via the
-public `releases/expanded_assets/<tag>` page. Deleting a tag turns its
-release into an unpublished draft. `deploy-web.yml` needs Pages enabled
-(currently not) — its failure on push is expected. CI pins Flutter
-**3.44.7** — check new deps against that, not just against local Flutter.
-
-**Always run `flutter analyze && flutter test` before tagging.** The
-release workflow is not a CI gate — it only builds. A tag on code that
-doesn't compile costs a failed run *and* a tag deletion that leaves an
-unpublished draft release behind.
+**Release = tag push** — see the `release` skill for the full procedure.
+**Never tag without `flutter analyze && flutter test` green:** the release
+workflow is not a CI gate, it only builds, so a tag on code that doesn't
+compile costs a failed run *and* a tag deletion that leaves an unpublished
+draft release behind. Bump `version:` in pubspec **and
+`AppConstants.appVersion`** together (a test asserts the version format,
+not the value).
 
 ## Architecture (lib/)
 
@@ -78,12 +71,9 @@ unpublished draft release behind.
   delisted `XAUUSD=X` — GC=F is the only gold symbol. Chart caption reads
   `SpotGoldMarketData.candleSource`. True spot XAUUSD *candles* are
   paid-only; this is the free ceiling.
-- `indicators/` — pure, tested Dart: `Smma`, `Rsi`/`StochRsi`/
-  `RsiDivergence` (pivot-based), `Macd` (EMA 12/26/9 → line/signal/
-  histogram), `Adx` + ±DI (Wilder, trend strength), `Atr` (Wilder),
-  `KeyLevels` (**UTC midnight days, weeks start Monday 00:00 UTC** — never
-  mix with NY-5pm), `Fibonacci.auto` (pivot strength 5, lookback 120),
-  `CandlestickDetector` (14 threshold patterns, geometric only). MACD/ADX
+- `indicators/` — pure, tested Dart, Wilder maths where applicable.
+  `KeyLevels` uses **UTC midnight days, weeks start Monday 00:00 UTC** —
+  never mix with NY-5pm. `CandlestickDetector` is geometric only. MACD/ADX
   surface in the Analysis Momentum + Trend-Strength cards.
 - `ai/gold_master_engine.dart` — deterministic weighted rubric (5
   components → score 0-100, bias at 60/40, confidence, clarity, template
@@ -118,13 +108,6 @@ unpublished draft release behind.
   (`_onSpot`, throttled); StochRSI value shows both on the `IndicatorBar`
   and as an on-chart `#readout` overlay in chart.html.** Gotcha: the browser
   caches `chart.html` — hard-refresh after editing it.
-- `screens/onboarding/` — one-time intro (3 slides), gated by
-  `AppSettings.onboardingComplete`; `main.dart` shows it before the shell.
-- `screens/about/` — About Gold Master Pro (Home drawer): positioning,
-  feature summary, credits and the not-financial-advice disclaimer. Credits
-  **Luan Rohm** as designer and maker via `AppConstants.author`. Version
-  text comes from `AppConstants.appVersion` — **bump it alongside
-  `version:` in pubspec** (a test asserts the format, not the value).
 - `services/economic_calendar.dart` + `screens/calendar/` — this-week
   ForexFactory calendar (nfs.faireconomy.media weekly JSON, keyless; live
   native, bundled `assets/calendar/ff_thisweek.json` snapshot on web/offline
@@ -175,10 +158,7 @@ unpublished draft release behind.
   `docs/alerts_backend.md` (Cloudflare Worker skeleton). Open environment
   traps (browser-pane screenshots, cross-origin request logging, stale
   `chart.html`): `docs/known_issues.md`.
-- Theme `core/theme/app_theme.dart`: black `#0A0A0B` + gold `#E3B84C`
-  system; reusable `GmpCard`/`SectionLabel`/`GmpPill`/`StatTile`/
-  `GoldButton`/`ScoreGauge`. Branding assets `assets/branding/` from the
-  source jpeg via `tool/prepare_logo.dart`.
+- Theme `core/theme/app_theme.dart`: black `#0A0A0B` + gold `#E3B84C`.
 
 ## Hard-won gotchas
 

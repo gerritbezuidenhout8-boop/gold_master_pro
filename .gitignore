@@ -19,7 +19,10 @@ migrate_working_dir/
 .idea/
 
 # Local agent-session scratch (Cowork / Claude Code); CLAUDE.md IS tracked.
-.claude/
+# Excludes contents, not the dir itself, so the negation below can apply.
+.claude/*
+# ...except skills, which are shared project context like CLAUDE.md.
+!.claude/skills/
 
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
