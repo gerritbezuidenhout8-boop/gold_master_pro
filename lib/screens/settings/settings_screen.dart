@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../services/app_settings.dart';
+import '../../services/notifications.dart';
 import '../../widgets/gmp_card.dart';
 
-/// App settings (spec: Settings). Auto Refresh and Price Alerts take real
-/// effect; Score/News/Push persist the choice but await the cloud backend.
+/// App settings (spec: Settings). Auto Refresh, Price Alerts and Signal
+/// Alerts all take real effect; News/Push persist the choice but await the
+/// cloud backend.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -30,8 +32,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _value('Market Session', 'Auto'),
           ]),
           _section('Notifications', [
-            _toggle('Price Alerts', _s.priceAlerts, _s.setPriceAlerts),
-            _toggle('Score Alerts', _s.scoreAlerts, _s.setScoreAlerts),
+            _toggle('Price Alerts', _s.priceAlerts, _grant(_s.setPriceAlerts)),
+            _toggle('Signal Alerts', _s.scoreAlerts, _grant(_s.setScoreAlerts)),
             _toggle('News Alerts', _s.newsAlerts, _s.setNewsAlerts),
             _toggle('Push Notifications', _s.pushNotifications,
                 _s.setPushNotifications),
@@ -44,10 +46,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
-              'Auto Refresh drives the Markets watchlist, and Price Alerts '
-              'turns the in-app alert notifications on or off — both live. '
-              'Score, News and Push persist your choice but need the cloud '
-              'backend, which is not enabled in this build.',
+              'Signal Alerts notify you when the Gold Master Score reaches '
+              '80 or 20 and a trade plan opens; Price Alerts notify you when '
+              'a level you set is crossed. Both are delivered by the running '
+              'app, so they arrive while GMP is open or in the background, '
+              'but not once the phone has closed it. News and Push persist '
+              'your choice but need the cloud backend, which is not enabled '
+              'in this build.',
               style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
           ),
@@ -75,6 +80,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// "1 second" / "5 seconds" — the picker offers 1, so don't say "1 seconds".
+  static String _seconds(int s) => s == 1 ? '1 second' : '$s seconds';
+
   Widget _autoRefreshRow() {
     return ValueListenableBuilder<int>(
       valueListenable: AppSettings.instance.autoRefreshSeconds,
@@ -85,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('$seconds seconds',
+            Text(_seconds(seconds),
                 style: const TextStyle(color: AppTheme.gold)),
             const SizedBox(width: 4),
             const Icon(Icons.chevron_right,
@@ -111,7 +119,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             for (final s in AppSettings.autoRefreshOptions)
               ListTile(
-                title: Text('$s seconds',
+                title: Text(_seconds(s),
                     style: const TextStyle(color: AppTheme.textPrimary)),
                 trailing: s == AppSettings.instance.autoRefreshSeconds.value
                     ? const Icon(Icons.check, color: AppTheme.gold)
@@ -140,6 +148,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  /// Wraps a setter so switching a notification on first asks the OS for
+  /// permission. Turning it off never prompts.
+  ValueChanged<bool> _grant(Future<void> Function(bool) set) => (bool on) async {
+        if (on) await Notifications.instance.requestPermission();
+        await set(on);
+      };
 
   Widget _toggle(
       String label, ValueNotifier<bool> notifier, ValueChanged<bool> onChanged) {

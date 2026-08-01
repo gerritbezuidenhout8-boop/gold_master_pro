@@ -158,6 +158,56 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a candle-stream update does not override the live spot close',
+      (tester) async {
+    // The jumping-chart regression. The candle feed and the ticker are
+    // different vendors, so when both wrote the forming candle's close the
+    // bar flipped between two price levels — and painted red candles on
+    // green moves, because open and close came from different sources.
+    final quotes = StreamController<SpotQuote>.broadcast();
+    final updates = StreamController<Candle>();
+    MarketData.instance = _QuoteFakeMarketData(quotes.stream);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: ChartScreen(
+        loadCandles: (_) => Future.value(_syntheticCandles(60)),
+        streamCandles: (_) => updates.stream,
+      ),
+    ));
+    await tester.pump();
+
+    quotes.add(SpotQuote(price: 175, time: DateTime.utc(2026), source: 'test'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(
+      tester.widget<GmpChart>(find.byType(GmpChart)).datas.last.close,
+      175,
+    );
+
+    // The feed now re-sends the same (forming) bar at its own price level.
+    updates.add(Candle(
+      time: DateTime.utc(2026, 1, 1).add(const Duration(hours: 59)),
+      open: 159.0,
+      high: 160.0,
+      low: 158.0,
+      close: 159.5, // the other vendor's level — must not win
+      volume: 5,
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    final datas = tester.widget<GmpChart>(find.byType(GmpChart)).datas;
+    expect(datas, hasLength(60), reason: 'still the same forming bar');
+    expect(datas.last.close, 175, reason: 'spot stays the authority');
+
+    await quotes.close();
+    await updates.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('shows the error state with a retry button when loading fails',
       (tester) async {
     var calls = 0;

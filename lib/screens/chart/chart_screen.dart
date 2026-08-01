@@ -75,6 +75,14 @@ class _ChartScreenState extends State<ChartScreen> {
     // than the candle feed and is the price the trader actually watches —
     // fold each tick into the forming candle so the chart moves with spot.
     _quoteSub = MarketData.instance.quoteStream().listen(_onSpot);
+    // Owned by the screen, not by _load: when a load failed, the throttle
+    // used to never start, so the chart stayed frozen even after a retry.
+    _throttle = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_dirty && mounted) {
+        _dirty = false;
+        _rebuild();
+      }
+    });
   }
 
   @override
@@ -85,29 +93,48 @@ class _ChartScreenState extends State<ChartScreen> {
     super.dispose();
   }
 
+  /// Latest live spot. Spot is the single authority for the forming
+  /// candle's close: the candle feed and the ticker are different vendors,
+  /// and letting both write the close made the bar flip between two price
+  /// levels and paint red candles on green moves.
+  double? _spotPrice;
+
   /// Live spot → the last (forming) candle's close, extending its high/low.
   /// Coalesced into the throttled rebuild like the candle-stream updates.
   void _onSpot(SpotQuote q) {
-    if (!mounted || _candles.isEmpty) return;
+    if (!mounted) return;
+    _spotPrice = q.price;
+    if (_applySpot()) _dirty = true;
+  }
+
+  /// Folds the latest spot into the forming candle. Returns whether anything
+  /// changed. Re-applied after every candle-stream merge so the live close
+  /// never regresses to the feed's own price between ticks.
+  bool _applySpot() {
+    final price = _spotPrice;
+    if (price == null || _candles.isEmpty) return false;
     final last = _candles.last;
-    final price = q.price;
-    if (price == last.close) return;
-    final updated = Candle(
-      time: last.time,
-      open: last.open,
-      high: price > last.high ? price : last.high,
-      low: price < last.low ? price : last.low,
-      close: price,
-      volume: last.volume,
-    );
-    _candles = [..._candles.sublist(0, _candles.length - 1), updated];
-    _dirty = true;
+    if (price == last.close) return false;
+    _candles = [
+      ..._candles.sublist(0, _candles.length - 1),
+      Candle(
+        time: last.time,
+        open: last.open,
+        high: price > last.high ? price : last.high,
+        low: price < last.low ? price : last.low,
+        close: price,
+        volume: last.volume,
+      ),
+    ];
+    return true;
   }
 
   Future<void> _load(String tf) async {
     unawaited(_sub?.cancel());
     _sub = null;
-    _throttle?.cancel();
+    // Drop any pending update from the timeframe we're leaving, so the
+    // throttle can't rebuild the outgoing series mid-load.
+    _dirty = false;
     setState(() {
       _datas = null;
       _error = null;
@@ -115,6 +142,9 @@ class _ChartScreenState extends State<ChartScreen> {
     try {
       final candles = await _loader(tf);
       if (!mounted || _timeframe != tf) return;
+      // A fresh series carries its own alignment; drop the previous
+      // timeframe's spot so it can't be folded into the wrong bar.
+      _spotPrice = null;
       _candles = candles;
       _rebuild();
       // Forming-candle updates arrive several times a second; just mark
@@ -123,13 +153,9 @@ class _ChartScreenState extends State<ChartScreen> {
       _sub = _streamer(tf).listen((update) {
         if (!mounted) return;
         _candles = mergeCandle(_candles, update);
+        // Spot wins for the live close — see _applySpot.
+        _applySpot();
         _dirty = true;
-      });
-      _throttle = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (_dirty && mounted) {
-          _dirty = false;
-          _rebuild();
-        }
       });
     } catch (e) {
       if (!mounted || _timeframe != tf) return;

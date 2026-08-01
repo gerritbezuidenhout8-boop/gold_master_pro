@@ -10,6 +10,7 @@ import '../../widgets/gold_button.dart';
 import '../../widgets/live_price_card.dart';
 import '../../widgets/score_gauge.dart';
 import '../../widgets/stat_tile.dart';
+import '../about/about_screen.dart';
 import '../calendar/economic_calendar_screen.dart';
 import '../settings/settings_screen.dart';
 import '../trade_plan/trade_plan_screen.dart';
@@ -413,11 +414,16 @@ class _HomeDrawer extends StatelessWidget {
                     builder: (_) => const SettingsScreen()));
               },
             ),
-            const ListTile(
-              leading: Icon(Icons.info_outline, color: AppTheme.gold),
-              title: Text('About Gold Master Pro'),
-              subtitle: Text('Evidence-based gold analysis',
+            ListTile(
+              leading: const Icon(Icons.info_outline, color: AppTheme.gold),
+              title: const Text('About Gold Master Pro'),
+              subtitle: const Text('Evidence-based gold analysis',
                   style: TextStyle(color: AppTheme.textSecondary)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const AboutScreen()));
+              },
             ),
             const Spacer(),
             const Padding(

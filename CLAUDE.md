@@ -26,19 +26,26 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; ~161 tests (v1.1.1) |
+| `flutter analyze` / `flutter test` | keep both green; ~180 tests (v1.1.2) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
 | `dart run flutter_launcher_icons` | regenerate launcher icons |
 
-**Release = tag push:** bump `version:` in pubspec, commit, push, then
-`git tag v1.0.x && git push origin v1.0.x` → `.github/workflows/release.yml`
+**Release = tag push:** bump `version:` in pubspec **and
+`AppConstants.appVersion`**, commit, push, then
+`git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml`
 builds and attaches `app-release.apk` + `gmp-web.zip` (~6 min). Download
-URL pattern: `releases/download/v1.0.x/app-release.apk`. Verify via the
+URL pattern: `releases/download/vX.Y.Z/app-release.apk`. Verify via the
 public `releases/expanded_assets/<tag>` page. Deleting a tag turns its
 release into an unpublished draft. `deploy-web.yml` needs Pages enabled
-(currently not) — its failure on push is expected.
+(currently not) — its failure on push is expected. CI pins Flutter
+**3.44.7** — check new deps against that, not just against local Flutter.
+
+**Always run `flutter analyze && flutter test` before tagging.** The
+release workflow is not a CI gate — it only builds. A tag on code that
+doesn't compile costs a failed run *and* a tag deletion that leaves an
+unpublished draft release behind.
 
 ## Architecture (lib/)
 
@@ -57,9 +64,20 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   `spot − lastClose` so the chart reads at true gold-api XAU spot levels;
   `_spotOffset` is reused to shift streamed bars. gold-api has no OHLC, so a
   proxy still supplies bar *shapes* — only levels are spot (shift-invariant
-  for RSI/MACD/StochRSI).** Yahoo delisted `XAUUSD=X` — GC=F is the only gold
-  symbol. Chart caption reads `SpotGoldMarketData.candleSource`. True spot
-  XAUUSD *candles* are paid-only; this is the free ceiling.
+  for RSI/MACD/StochRSI).** **v1.1.2 — the jumping-chart fix: never let two
+  vendors write one bar.** The ticker was Swissquote, the candle alignment
+  was gold-api, and `_spotOffset` was frozen at load, so the forming bar
+  flipped between two levels and painted red candles on green moves (open
+  from one source, close from the other). Now `_spotQuote()` is the single
+  spot source for **both** `quoteStream` and `_alignToSpot`; every tick
+  records `_lastSpot`; and `anchorCandleToSpot` (pure, tested) re-anchors
+  each streamed bar so its close lands on live spot with open/high/low
+  shifted by the same delta — level from spot, shape (and therefore colour)
+  from the proxy. ChartScreen mirrors this: `_applySpot()` re-runs after
+  every `mergeCandle`, so spot always wins for the live close. Yahoo
+  delisted `XAUUSD=X` — GC=F is the only gold symbol. Chart caption reads
+  `SpotGoldMarketData.candleSource`. True spot XAUUSD *candles* are
+  paid-only; this is the free ceiling.
 - `indicators/` — pure, tested Dart: `Smma`, `Rsi`/`StochRsi`/
   `RsiDivergence` (pivot-based), `Macd` (EMA 12/26/9 → line/signal/
   histogram), `Adx` + ±DI (Wilder, trend strength), `Atr` (Wilder),
@@ -102,6 +120,11 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   caches `chart.html` — hard-refresh after editing it.
 - `screens/onboarding/` — one-time intro (3 slides), gated by
   `AppSettings.onboardingComplete`; `main.dart` shows it before the shell.
+- `screens/about/` — About Gold Master Pro (Home drawer): positioning,
+  feature summary, credits and the not-financial-advice disclaimer. Credits
+  **Luan Rohm** as designer and maker via `AppConstants.author`. Version
+  text comes from `AppConstants.appVersion` — **bump it alongside
+  `version:` in pubspec** (a test asserts the format, not the value).
 - `services/economic_calendar.dart` + `screens/calendar/` — this-week
   ForexFactory calendar (nfs.faireconomy.media weekly JSON, keyless; live
   native, bundled `assets/calendar/ff_thisweek.json` snapshot on web/offline
@@ -109,6 +132,28 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
 - `state/alerts_controller.dart` — app-wide singleton ChangeNotifier
   (deliberately no Riverpod). `widgets/alert_watcher.dart` wraps the
   shell, evaluates `AlertEngine.fires` crossings, one-shot until re-armed.
+- **Notifications (v1.1.2).** `services/notifications.dart` — swappable
+  `Notifications.instance` seam like `MarketData`: `NoopNotifications` is
+  the default (so tests and unconfigured platforms never touch a platform
+  channel), `main()` installs `LocalNotifications`
+  (`flutter_local_notifications`, Android/iOS/macOS/Windows), and
+  `RecordingNotifications` is the test double. Everything that fires posts
+  an OS notification **and** an in-app SnackBar. Android needs
+  `POST_NOTIFICATIONS` in the manifest plus **core library desugaring** in
+  `android/app/build.gradle.kts` — the plugin does not link without it.
+  Ids live in `GmpNotificationIds` so a newer notification of a kind
+  replaces the older one. Notification copy follows the positioning rule:
+  "setup detected … analysis only", never an instruction to trade.
+- **`state/plan_scout.dart` — why signals notify at all.** Before it, a
+  plan was only generated inside the Trade Plan screen's refresh, so a
+  score reaching 80 while you were anywhere else was silently missed.
+  The scout runs the same `GoldMasterEngine` → `TradePlanEngine` →
+  `SignalController.issue` chain off the live quote stream, throttled to
+  `minInterval` (1 min — the score only moves on new candles) with daily
+  candles cached for 15 min. Network-tolerant by design: it returns null
+  rather than throwing, because it runs inside a stream listener that must
+  not die. Gated by `AppSettings.scoreAlerts` ("Signal Alerts", default
+  on).
 - **Signal lifecycle — one trade at a time.** `state/signal_controller.dart`
   (2nd ChangeNotifier singleton) owns it: `canIssue` is the gate, so a new
   plan opens only when nothing is running, and the open trade closes *only*
@@ -149,4 +194,8 @@ release into an unpublished draft. `deploy-web.yml` needs Pages enabled
   before asserting below-fold. `SectionLabel`/`GmpPill` UPPERCASE their
   text. The chart-screen throttle needs `pump(Duration(seconds: 1))`.
 - Markets tab auto-refreshes on `AppSettings.autoRefreshSeconds`
-  (default 5 s, persisted) from gold-api.com (also Silver/Copper/BTC/ETH).
+  (**default 1 s** since v1.1.2, persisted) from gold-api.com (also
+  Silver/Copper/BTC/ETH). One refresh = **five parallel** keyless requests,
+  and `_load()` skips a tick while a round is in flight, so the real ceiling
+  is one round per round-trip. If gold-api starts 429ing, raise the interval
+  or batch the five symbols — don't lower the floor below 1 s.

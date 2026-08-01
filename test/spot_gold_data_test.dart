@@ -71,6 +71,60 @@ void main() {
     });
   });
 
+  group('anchorCandleToSpot', () {
+    // The regression: candles came from one vendor and the ticker from
+    // another, with a frozen offset between them, so the forming bar flipped
+    // between two price levels and painted red candles on green moves.
+    Candle proxyBar({required double open, required double close}) => Candle(
+          time: DateTime.utc(2026, 7, 21, 9),
+          open: open,
+          high: (open > close ? open : close) + 2,
+          low: (open < close ? open : close) - 2,
+          close: close,
+          volume: 7,
+        );
+
+    test('puts the close exactly on spot', () {
+      final anchored =
+          anchorCandleToSpot(proxyBar(open: 4100, close: 4104), 4285.5, 0);
+      expect(anchored.close, closeTo(4285.5, 1e-9));
+    });
+
+    test('preserves the bar shape, so a green proxy move stays green', () {
+      final raw = proxyBar(open: 4100, close: 4104); // up 4
+      final anchored = anchorCandleToSpot(raw, 4285.5, 0);
+
+      expect(anchored.close, greaterThan(anchored.open), reason: 'still green');
+      expect(anchored.close - anchored.open, closeTo(4, 1e-9));
+      expect(anchored.high - anchored.low, closeTo(raw.high - raw.low, 1e-9));
+      expect(anchored.time, raw.time);
+      expect(anchored.volume, raw.volume);
+    });
+
+    test('a falling proxy bar stays red after anchoring', () {
+      final anchored =
+          anchorCandleToSpot(proxyBar(open: 4104, close: 4100), 4285.5, 0);
+      expect(anchored.close, lessThan(anchored.open));
+      expect(anchored.close, closeTo(4285.5, 1e-9));
+    });
+
+    test('anchoring is idempotent — re-anchoring at the same spot is a no-op',
+        () {
+      final once =
+          anchorCandleToSpot(proxyBar(open: 4100, close: 4104), 4285.5, 0);
+      final twice = anchorCandleToSpot(once, 4285.5, 0);
+      expect(twice.open, closeTo(once.open, 1e-9));
+      expect(twice.close, closeTo(once.close, 1e-9));
+    });
+
+    test('falls back to the series offset before the first quote', () {
+      final raw = proxyBar(open: 4100, close: 4104);
+      final anchored = anchorCandleToSpot(raw, null, 180.0);
+      expect(anchored.close, closeTo(4284.0, 1e-9));
+      expect(anchored.open, closeTo(4280.0, 1e-9));
+    });
+  });
+
   group('quoteFromSwissquote', () {
     test('takes the mid of the first spread profile', () {
       const body = '[{"topo":{"platform":"X"},"spreadProfilePrices":'

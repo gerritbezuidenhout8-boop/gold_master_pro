@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show ValueNotifier, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show ValueNotifier, kIsWeb, visibleForTesting;
 import 'package:http/http.dart' as http;
 
 import '../models/candle.dart';
@@ -25,10 +26,19 @@ class SpotGoldMarketData implements MarketData {
 
   final BinanceMarketData _binance;
 
-  /// Offset applied to align the proxy candle series to the live gold-api
-  /// XAU spot; reused by [candleStream] so streamed bars land at the same
-  /// levels as the history.
+  /// Offset applied to align the proxy candle series to live XAU spot;
+  /// the fallback for [candleStream] before the first live quote arrives.
   double _spotOffset = 0;
+
+  /// Newest live spot price, recorded from [quoteStream] and the alignment
+  /// fetch. [candleStream] re-anchors each forming bar to it.
+  ///
+  /// This exists because a *frozen* offset was the source of a real bug: the
+  /// ticker (Swissquote) and the candle alignment (gold-api) were different
+  /// vendors, and the offset was computed once at load, so as GC=F drifted
+  /// against spot the chart flipped between two price levels and painted
+  /// false red bars. One spot source, re-anchored live, is the fix.
+  double? _lastSpot;
 
   /// UI-facing label of the source that actually supplied the candles.
   static final ValueNotifier<String> candleSource =
@@ -81,24 +91,27 @@ class SpotGoldMarketData implements MarketData {
     }
   }
 
-  /// Shifts the proxy series so its last close equals the live gold-api XAU
-  /// spot, so the chart reads at true spot levels (gold-api has no OHLC
-  /// history, so a keyless proxy supplies the bar shapes). Records the
-  /// offset for [candleStream]; falls back to raw bars if spot is
-  /// unreachable.
+  /// Shifts the proxy series so its last close equals live XAU spot from
+  /// [_spotQuote], so the chart reads at true spot levels (no free feed has
+  /// spot OHLC history, so a keyless proxy supplies the bar shapes). Seeds
+  /// `_lastSpot` and the `_spotOffset` fallback for [candleStream]; falls
+  /// back to raw bars if spot is unreachable.
   Future<List<Candle>> _alignToSpot(List<Candle> candles, String proxy) async {
     if (candles.isEmpty) {
       candleSource.value = 'XAU/USD · $proxy';
       return candles;
     }
-    final spot = await fetchXauSpot();
+    // Deliberately the same source the ticker uses — aligning to one vendor
+    // while streaming another is what made the chart jump.
+    final spot = await _spotQuote();
     if (spot == null) {
       _spotOffset = 0;
       candleSource.value = 'XAU/USD · $proxy';
       return candles;
     }
+    _lastSpot = spot.price;
     _spotOffset = spot.price - candles.last.close;
-    candleSource.value = 'XAU/USD spot · gold-api ($proxy bars)';
+    candleSource.value = 'XAU/USD spot ($proxy bars)';
     return [for (final c in candles) _shift(c, _spotOffset)];
   }
 
@@ -113,12 +126,8 @@ class SpotGoldMarketData implements MarketData {
 
   @override
   Stream<Candle> candleStream(String timeframe) {
-    // Streamed bars are shifted by the same offset as the loaded history so
-    // they stay at gold-api spot levels.
     if (kIsWeb) {
-      return _binance
-          .candleStream(timeframe)
-          .map((c) => _shift(c, _spotOffset));
+      return _binance.candleStream(timeframe).map(anchorToSpot);
     }
     final spec = _yahoo[timeframe];
     if (spec == null) {
@@ -136,35 +145,47 @@ class SpotGoldMarketData implements MarketData {
         candles = aggregateCandles(candles, const Duration(hours: 4));
       }
       return candles.isEmpty ? null : candles.last;
-    }).map((c) => _shift(c, _spotOffset));
+    }).map(anchorToSpot);
   }
 
+  /// Pins a streamed (forming) bar to the latest live spot.
+  @visibleForTesting
+  Candle anchorToSpot(Candle c) =>
+      anchorCandleToSpot(c, _lastSpot, _spotOffset);
+
   @override
-  Stream<SpotQuote> quoteStream() {
-    // Web can't reach Swissquote (it sends no CORS header), so poll
-    // gold-api.com's real XAU/USD spot instead of the Binance PAXG ticker.
-    // Single price only (no bid/ask) — the trade panel already falls back
-    // to a single-price display on web.
-    if (kIsWeb) {
-      return _poll<SpotQuote>(const Duration(seconds: 4), fetchXauSpot);
-    }
-    return _poll<SpotQuote>(const Duration(seconds: 4), () async {
-      try {
-        final res = await http
-            .get(
-              Uri.parse('https://forex-data-feed.swissquote.com'
-                  '/public-quotes/bboquotes/instrument/XAU/USD'),
-            )
-            .timeout(const Duration(seconds: 6));
-        if (res.statusCode == 200) {
-          final q = quoteFromSwissquote(res.body);
-          if (q != null) return q;
-        }
-      } on Exception {
-        // try gold-api below
+  Stream<SpotQuote> quoteStream() =>
+      _poll<SpotQuote>(const Duration(seconds: 4), _spotQuote).map((q) {
+        // Every live tick re-anchors the candle stream, so the bars and the
+        // ticker can never drift onto two different price levels.
+        _lastSpot = q.price;
+        return q;
+      });
+
+  /// The single live-spot source for the whole class: Swissquote XAU/USD,
+  /// falling back to gold-api. On web Swissquote sends no CORS header, so
+  /// gold-api is used directly (single price, no bid/ask — the trade panel
+  /// already degrades to a single-price display there).
+  ///
+  /// Both [quoteStream] and [_alignToSpot] go through here on purpose: using
+  /// two vendors is what put the candles and the ticker on different levels.
+  Future<SpotQuote?> _spotQuote() async {
+    if (kIsWeb) return _binance.fetchXauSpot();
+    try {
+      final res = await http
+          .get(
+            Uri.parse('https://forex-data-feed.swissquote.com'
+                '/public-quotes/bboquotes/instrument/XAU/USD'),
+          )
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final q = quoteFromSwissquote(res.body);
+        if (q != null) return q;
       }
-      return _binance.fetchXauSpot();
-    });
+    } on Exception {
+      // try gold-api below
+    }
+    return _binance.fetchXauSpot();
   }
 
   @override
@@ -198,6 +219,26 @@ class SpotGoldMarketData implements MarketData {
     );
     return controller.stream;
   }
+}
+
+/// Shifts [c] so its close sits exactly on [spot], moving open/high/low by
+/// the same delta; falls back to [fallbackOffset] when no spot is known yet.
+///
+/// The bar keeps the proxy's *shape* — so its colour still reflects the
+/// proxy's real open-to-close move — while its *level* matches the ticker.
+/// Shifting by a stale series offset instead left the close on one vendor
+/// and the open on another, which painted red candles on green moves and
+/// made the chart flip between two price ranges.
+Candle anchorCandleToSpot(Candle c, double? spot, double fallbackOffset) {
+  final delta = spot == null ? fallbackOffset : spot - c.close;
+  return Candle(
+    time: c.time,
+    open: c.open + delta,
+    high: c.high + delta,
+    low: c.low + delta,
+    close: c.close + delta,
+    volume: c.volume,
+  );
 }
 
 /// Parses Yahoo's v8 chart payload into candles (null buckets skipped).

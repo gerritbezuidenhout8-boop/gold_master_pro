@@ -10,18 +10,26 @@ class AppSettings {
   static final AppSettings instance = AppSettings._();
 
   /// Options offered in the picker.
-  static const List<int> autoRefreshOptions = [5, 10, 15, 30, 60];
+  ///
+  /// 1 s is the floor on purpose: each Markets refresh is five parallel
+  /// gold-api.com requests, and the screen skips a tick while one round is
+  /// still in flight, so anything faster would only queue up refusals.
+  static const List<int> autoRefreshOptions = [1, 5, 10, 15, 30, 60];
 
-  /// Seconds between automatic refreshes (default 5).
-  final ValueNotifier<int> autoRefreshSeconds = ValueNotifier(5);
+  /// Seconds between automatic refreshes (default 1).
+  final ValueNotifier<int> autoRefreshSeconds = ValueNotifier(1);
 
-  /// Master switch for in-app price-alert notifications (default on). The
-  /// [AlertWatcher] consults this before firing a SnackBar.
+  /// Master switch for price-alert notifications (default on). The
+  /// [AlertWatcher] consults this before evaluating crossings.
   final ValueNotifier<bool> priceAlerts = ValueNotifier(true);
+
+  /// Master switch for trade-signal notifications — a plan opening because
+  /// the Gold Master Score reached 80 or 20 (default on). The [AlertWatcher]
+  /// consults this before running [PlanScout].
+  final ValueNotifier<bool> scoreAlerts = ValueNotifier(true);
 
   /// Forward-looking toggles: persisted, but their delivery needs the
   /// (deferred) cloud backend — see docs/alerts_backend.md.
-  final ValueNotifier<bool> scoreAlerts = ValueNotifier(false);
   final ValueNotifier<bool> newsAlerts = ValueNotifier(false);
   final ValueNotifier<bool> pushNotifications = ValueNotifier(false);
 
@@ -40,7 +48,7 @@ class AppSettings {
     final v = prefs.getInt(_key);
     if (v != null && v > 0) autoRefreshSeconds.value = v;
     priceAlerts.value = prefs.getBool(_priceKey) ?? true;
-    scoreAlerts.value = prefs.getBool(_scoreKey) ?? false;
+    scoreAlerts.value = prefs.getBool(_scoreKey) ?? true;
     newsAlerts.value = prefs.getBool(_newsKey) ?? false;
     pushNotifications.value = prefs.getBool(_pushKey) ?? false;
     onboardingComplete.value = prefs.getBool(_onboardKey) ?? false;

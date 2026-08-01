@@ -5,6 +5,7 @@ import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/shell/root_shell.dart';
 import 'services/app_settings.dart';
 import 'services/market_data.dart';
+import 'services/notifications.dart';
 import 'services/spot_gold_data.dart';
 
 void main() async {
@@ -13,6 +14,10 @@ void main() async {
   // Real-gold data source (futures candles + bank-spot ticker), with the
   // PAXG feed as automatic fallback (and the only path on web).
   MarketData.instance = SpotGoldMarketData();
+  // Real OS notifications for signals and price alerts. Left as the no-op
+  // under tests, which never call main().
+  Notifications.instance = LocalNotifications();
+  await Notifications.instance.init();
   runApp(const GmpApp());
 }
 

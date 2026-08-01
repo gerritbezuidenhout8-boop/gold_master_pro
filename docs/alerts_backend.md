@@ -1,10 +1,19 @@
 # Background alerts (optional, ~$0 on free tiers)
 
-In-app alerts already work: while GMP is open, `AlertWatcher` evaluates
-the live price and pops a SnackBar on a crossing. **Background** delivery
-(alert fires while the app is closed) can't run on the device — a phone
-OS suspends the app — so it needs a tiny always-on service. This design
-stays within free tiers.
+Local notifications already work: while GMP is running, `AlertWatcher`
+evaluates the live price for crossing rules and runs `PlanScout` (throttled
+to once a minute) to look for a Gold Master Score of 80+/20-. Anything that
+fires posts a real OS notification via `flutter_local_notifications` plus an
+in-app SnackBar, so alerts arrive even when GMP is backgrounded.
+
+What still needs this document is delivery **after the OS has killed the
+process** — a suspended app can't watch a price feed, so that needs a tiny
+always-on service. This design stays within free tiers.
+
+Note the crossing rule below covers price alerts only. Server-side signal
+alerts would additionally need the indicator stack (`GoldMasterEngine` +
+`TradePlanEngine`) ported to the Worker, or the score computed on-device and
+mirrored up.
 
 ## Architecture
 
