@@ -43,7 +43,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; **185 tests** (v1.1.2) |
+| `flutter analyze` / `flutter test` | keep both green; **187 tests** (v1.1.3) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -167,7 +167,15 @@ draft release behind.
   `POST_NOTIFICATIONS` in the manifest plus **core library desugaring** in
   `android/app/build.gradle.kts` — the plugin does not link without it.
   Ids live in `GmpNotificationIds` so a newer notification of a kind
-  replaces the older one. Notification copy follows the positioning rule:
+  replaces the older one. **v1.1.3 — Android 13+ drops every notification
+  until `POST_NOTIFICATIONS` is granted *at runtime*; the manifest entry
+  alone does nothing.** The Settings toggles only prompt on an off→on
+  transition and both alert switches default to *on*, so a fresh install
+  never flipped one, never asked, and alerts silently went nowhere while
+  the in-app SnackBar still appeared — which made it look like they worked.
+  `AlertWatcher.initState` now calls `requestPermission()` whenever either
+  alert toggle is on. Keep that call: it is the only thing that asks on a
+  default install. Notification copy follows the positioning rule:
   "setup detected … analysis only", never an instruction to trade.
 - **`state/plan_scout.dart` — why signals notify at all.** Before it, a
   plan was only generated inside the Trade Plan screen's refresh, so a

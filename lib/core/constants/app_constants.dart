@@ -6,7 +6,7 @@ class AppConstants {
   static const String symbol = 'XAUUSD';
 
   /// Shown on the About screen. Keep in step with `version:` in pubspec.yaml.
-  static const String appVersion = '1.1.2';
+  static const String appVersion = '1.1.3';
 
   /// Credited on the About screen.
   static const String author = 'Luan Rohm';

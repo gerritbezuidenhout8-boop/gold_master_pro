@@ -92,6 +92,52 @@ void main() {
     AppSettings.instance.scoreAlerts.value = true;
   });
 
+  testWidgets('asks for notification permission on mount when alerts are on',
+      (tester) async {
+    AlertsController.instance = AlertsController(store: _MemStore());
+    final quotes = StreamController<SpotQuote>();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: AlertWatcher(
+        quotes: quotes.stream,
+        child: const Scaffold(body: SizedBox()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // Android 13+ drops every notification until POST_NOTIFICATIONS is granted
+    // at runtime. The Settings toggles only prompt on an off→on transition,
+    // and both alert switches default to on — so a fresh install never flipped
+    // one, never asked, and alerts silently went nowhere.
+    expect(notifications.permissionRequests, 1);
+
+    await quotes.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('does not ask for permission when every alert is off',
+      (tester) async {
+    AppSettings.instance.priceAlerts.value = false;
+    AppSettings.instance.scoreAlerts.value = false;
+    AlertsController.instance = AlertsController(store: _MemStore());
+    final quotes = StreamController<SpotQuote>();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: AlertWatcher(
+        quotes: quotes.stream,
+        child: const Scaffold(body: SizedBox()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(notifications.permissionRequests, 0);
+
+    await quotes.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('shows an in-app SnackBar when a watched level is crossed',
       (tester) async {
     final store = _MemStore(

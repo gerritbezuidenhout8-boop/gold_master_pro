@@ -53,6 +53,7 @@ class _AlertWatcherState extends State<AlertWatcher> {
     super.initState();
     AlertsController.instance.load();
     SignalController.instance.load();
+    _ensureNotificationPermission();
     final quotes = widget.quotes ?? MarketData.instance.quoteStream();
     _sub = quotes.listen((q) {
       // A running signal is tracked regardless of the alert toggle: closing
@@ -72,6 +73,24 @@ class _AlertWatcherState extends State<AlertWatcher> {
         _announceAlert(rule, q.price);
       }
     });
+  }
+
+  /// Ask for notification permission on the way in.
+  ///
+  /// Android 13+ drops every notification until `POST_NOTIFICATIONS` is
+  /// granted **at runtime** — the manifest entry alone does nothing. The
+  /// Settings toggles only prompt on an off→on transition, and both alert
+  /// switches default to *on*, so a fresh install never flipped one and
+  /// therefore never asked: alerts silently went nowhere while the in-app
+  /// SnackBar still appeared, which made it look like they worked.
+  ///
+  /// Fire-and-forget: a refusal is the user's call, and the app must keep
+  /// working (SnackBars, signal tracking) without the OS channel.
+  void _ensureNotificationPermission() {
+    final settings = AppSettings.instance;
+    if (settings.priceAlerts.value || settings.scoreAlerts.value) {
+      unawaited(Notifications.instance.requestPermission());
+    }
   }
 
   /// Runs one throttled analysis and announces a plan if one opened.

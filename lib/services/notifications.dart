@@ -74,12 +74,16 @@ class RecordingNotifications implements Notifications {
   final List<GmpNotification> shown = <GmpNotification>[];
   bool granted = true;
   int initCalls = 0;
+  int permissionRequests = 0;
 
   @override
   Future<void> init() async => initCalls++;
 
   @override
-  Future<bool> requestPermission() async => granted;
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    return granted;
+  }
 
   @override
   Future<void> show(GmpNotification notification) async =>
