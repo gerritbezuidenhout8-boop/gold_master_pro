@@ -1,0 +1,10 @@
+# Runtime state — never commit these. hwm.json in particular is account
+# data, and a stale one committed over a live one silently resets your
+# drawdown baseline.
+hwm.json
+KILL_SWITCH_FIRED.json
+*.log
+.venv/
+venv/
+__pycache__/
+*.pyc

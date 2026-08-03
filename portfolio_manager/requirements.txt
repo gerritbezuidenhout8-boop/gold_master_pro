@@ -1,0 +1,5 @@
+# Binance portfolio manager dependencies.
+# Pinned to majors so a breaking release can't silently change order behaviour.
+# Verified against ccxt 4.5.70 and pandas 3.0.5 (see selftest.py).
+ccxt>=4.4.0,<5
+pandas>=2.2.0
