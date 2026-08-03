@@ -1,8 +1,13 @@
 name: Deploy web
 
 on:
-  push:
-    branches: [main]
+  # Deliberately manual-only. GitHub Pages is not enabled for this repo, so a
+  # push-triggered deploy failed on *every* commit — a permanently red check
+  # trains you to ignore red checks, which is how a real failure gets missed.
+  # To restore automatic deploys, enable Pages (Settings -> Pages -> Source:
+  # "GitHub Actions") and put back:
+  #   push:
+  #     branches: [main]
   workflow_dispatch:
 
 # Publish the web build to GitHub Pages.

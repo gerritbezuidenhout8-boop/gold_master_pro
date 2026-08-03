@@ -27,6 +27,14 @@ jobs:
           cache: true
 
       - run: flutter pub get
+
+      # Gate the tag path. `ci.yml` only guards pushes to main, and a tag is
+      # normally pushed seconds later — before those checks report. Without
+      # these two steps a tag on red code still publishes a real APK, and
+      # backing that out costs a tag deletion plus an orphaned draft release.
+      - run: flutter analyze
+      - run: flutter test
+
       - run: flutter build apk --release
       - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
       - run: cd build/web && zip -r ../../gmp-web.zip . && cd ../..

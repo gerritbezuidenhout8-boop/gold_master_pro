@@ -12,21 +12,38 @@ signals as recommendations to trade.
 
 ## Environment (this Windows PC)
 
+- **The repo lives at `C:\dev\gold_master_pro`** — alongside the toolchain,
+  deliberately *off* OneDrive. A second working copy exists under
+  `OneDrive\Documents\Claude\Claude coding projects\Gold master pro\` and is
+  a **stale duplicate, not a mirror**: it was already a commit behind. Work
+  there and you will diverge silently. OneDrive also syncs `build/` and
+  `.dart_tool/` for no benefit and can leave files as cloud placeholders
+  that Gradle reads as empty.
 - Flutter `C:\dev\flutter` (on PATH) · JDK `C:\dev\java\jdk-21.0.11+10`
   (JAVA_HOME) · Android SDK `C:\dev\Android\Sdk` (ANDROID_HOME)
 - **Keep `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true`** (user env
   var): this network's DNS breaks Java's dual-stack resolver; Gradle and
   sdkmanager fail without it.
-- `flutter build windows` and some `pub add`s hit "enable Developer Mode"
-  (plugin symlinks). **Android/web builds and tests are unaffected** —
-  treat the message as noise unless targeting Windows desktop.
-- No `gh` CLI. Git pushes work via Git Credential Manager.
+- `flutter build windows`, `pub get`/`pub add`, **and now `flutter analyze`**
+  hit "enable Developer Mode" (plugin symlinks). Since v1.1.2 this fires on
+  a plain `analyze` too, because `flutter_local_notifications` ships a
+  Windows implementation that pulls desktop plugin registration into every
+  resolve. **Android/web builds and tests are unaffected** — treat it as
+  noise unless targeting Windows desktop, and just re-run: once dependencies
+  resolve, `analyze` completes normally.
+- No `gh` CLI. Git pushes work via Git Credential Manager. Read CI results
+  from the public API instead:
+  `api.github.com/repos/<owner>/<repo>/commits/<sha>/check-runs`.
+- **Stale `.git/index.lock`:** if git reports "Another git process seems to
+  be running", check for a real one (`Get-CimInstance Win32_Process -Filter
+  "Name='git.exe'"`) before deleting the lock. A crashed git run on
+  2026-08-01 left a 0-byte lock that got copied into both working trees.
 
 ## Commands
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; ~180 tests (v1.1.2) |
+| `flutter analyze` / `flutter test` | keep both green; **185 tests** (v1.1.2) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -39,13 +56,21 @@ builds and attaches `app-release.apk` + `gmp-web.zip` (~6 min). Download
 URL pattern: `releases/download/vX.Y.Z/app-release.apk`. Verify via the
 public `releases/expanded_assets/<tag>` page. Deleting a tag turns its
 release into an unpublished draft. `deploy-web.yml` needs Pages enabled
-(currently not) — its failure on push is expected. CI pins Flutter
+(currently not) and is therefore **`workflow_dispatch`-only since v1.1.2** —
+it no longer runs on push, because a permanently red check trains you to
+ignore red checks. Re-enable the push trigger when Pages is turned on.
+CI pins Flutter
 **3.44.7** — check new deps against that, not just against local Flutter.
 
-**Always run `flutter analyze && flutter test` before tagging.** The
-release workflow is not a CI gate — it only builds. A tag on code that
-doesn't compile costs a failed run *and* a tag deletion that leaves an
-unpublished draft release behind.
+**Always run `flutter analyze && flutter test` before tagging.** Two
+workflows check this, but neither removes the need to run it locally:
+`ci.yml` (analyze + test + web build) guards pushes to `main`, and **since
+v1.1.2 `release.yml` runs analyze + test before it builds**, so a tag can no
+longer publish an APK from red code. The trap the local run still catches:
+a tag is normally pushed seconds after the commit, *before* `ci.yml`
+reports — so without checking locally you learn it was broken only from the
+failed release run, which costs a tag deletion that leaves an unpublished
+draft release behind.
 
 ## Architecture (lib/)
 
