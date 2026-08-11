@@ -82,6 +82,10 @@ class SpotGoldMarketData implements MarketData {
       if (timeframe == 'H4') {
         candles = aggregateCandles(candles, const Duration(hours: 4));
       }
+      // Yahoo tacks the live quote on as a final point stamped with the
+      // current second, which would otherwise read as an extra sliver of a
+      // bar. Snapping to bar boundaries folds it into the bar it belongs to.
+      candles = normalizeCandles(candles, timeframe);
       if (candles.length > 500) {
         candles = candles.sublist(candles.length - 500);
       }
@@ -127,7 +131,10 @@ class SpotGoldMarketData implements MarketData {
   @override
   Stream<Candle> candleStream(String timeframe) {
     if (kIsWeb) {
-      return _binance.candleStream(timeframe).map(anchorToSpot);
+      return _binance
+          .candleStream(timeframe)
+          .map((c) => bucketCandle(c, timeframe))
+          .map(anchorToSpot);
     }
     final spec = _yahoo[timeframe];
     if (spec == null) {
@@ -144,6 +151,10 @@ class SpotGoldMarketData implements MarketData {
       if (timeframe == 'H4') {
         candles = aggregateCandles(candles, const Duration(hours: 4));
       }
+      // Snap before emitting: every poll inside the same bar must carry the
+      // same timestamp, or mergeCandle appends a new bar each time instead
+      // of filling out the one that is forming.
+      candles = normalizeCandles(candles, timeframe);
       return candles.isEmpty ? null : candles.last;
     }).map(anchorToSpot);
   }

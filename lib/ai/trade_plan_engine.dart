@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../indicators/atr.dart';
 import '../indicators/key_levels.dart';
 import '../models/candle.dart';
@@ -103,13 +105,81 @@ class TradePlan {
 class TradePlanEngine {
   TradePlanEngine._();
 
+  /// XAUUSD is quoted to $0.01 but conventionally moves in $0.10 "pips", so
+  /// 2000 pips = $200 of price.
+  static const double pipSize = 0.10;
+
+  /// Day-trading reach limit, in pips. A target further than this from entry
+  /// will not realistically be hit inside a session, so a sub-hour setup that
+  /// needs one is not a day trade — the plan is held to a closer target
+  /// instead. Example: entry 4020 with a stop at 4000 targets at most 4220.
+  static const double intradayMaxTpPips = 2000;
+
+  /// Hard ceiling on risk, in pips: the plan never stakes more than 500 pips
+  /// ($50) between entry and stop, on any timeframe. Applied *after* the ATR
+  /// clamps so it always wins — a volatile session cannot widen the stop
+  /// beyond what the account is willing to lose.
+  static const double maxStopPips = 500;
+
+  /// [maxStopPips] in price.
+  static const double maxStopDistance = maxStopPips * pipSize;
+
+  /// Conviction gate. Raised from 80/20 in v1.1.4: fewer setups, each with a
+  /// clearer edge. The goal is reaching the target, not issuing signals.
+  static const int defaultBullishThreshold = 85;
+  static const int defaultBearishThreshold = 15;
+
+  /// TP1 must sit at least this many risk multiples beyond entry, so a plan
+  /// never risks more than it aims to make, and the target is never so close
+  /// that it is not worth taking.
+  static const double minRewardRisk = 1.0;
+
+  /// How far price can plausibly travel in the trade's favour before the plan
+  /// goes stale, in ATR multiples. TP1 is the **furthest** key level inside
+  /// this reach: nearer targets leave money on the table, further ones are
+  /// not realistically hit. ATR is used rather than a fixed distance because
+  /// what counts as reachable depends entirely on how much gold is moving.
+  static const double reachAtrMultiple = 2.0;
+
+  /// How far the stop trails behind the best price, in risk multiples
+  /// ([TradeSignal.trailDistance]). 1.5R rather than 1R: the trail is a
+  /// safety net, not the intended exit, and a 1R trail closes trades that
+  /// would otherwise have reached target.
+  static const double trailRiskMultiple = 1.5;
+
+  /// Timeframes treated as day trades and held to [intradayMaxTpPips].
+  /// H1 is included as of v1.1.4 — it is the timeframe the Trade Plan screen
+  /// and the notification scout actually analyse, so leaving it out meant the
+  /// cap changed nothing about the signals you receive. H4/D1/W1 stay exempt.
+  static const Set<String> intradayTimeframes = {
+    'M1',
+    'M5',
+    'M15',
+    'M30',
+    'H1',
+  };
+
+  /// Maximum take-profit distance in price for [timeframe], or null when the
+  /// timeframe is uncapped.
+  static double? maxTpDistanceFor(String? timeframe) =>
+      timeframe != null && intradayTimeframes.contains(timeframe)
+          ? intradayMaxTpPips * pipSize
+          : null;
+
   static TradePlan? generate({
     required GoldMasterAnalysis analysis,
     required List<Candle> candles,
     required KeyLevelsResult levels,
-    int bullishThreshold = 80,
-    int bearishThreshold = 20,
+    int bullishThreshold = defaultBullishThreshold,
+    int bearishThreshold = defaultBearishThreshold,
     DateTime? now,
+
+    /// Timeframe the plan is for. Sub-hour timeframes cap the take-profit at
+    /// [intradayMaxTpPips]; H1+ (and null) do not.
+    String? timeframe,
+
+    /// Explicit cap in price, overriding [timeframe]. Mainly for tests.
+    double? maxTpDistance,
   }) {
     if (candles.isEmpty) return null;
     final long = analysis.score >= bullishThreshold;
@@ -120,7 +190,8 @@ class TradePlanEngine {
         candles: candles,
         levels: levels,
         long: long,
-        now: now);
+        now: now,
+        maxTpDistance: maxTpDistance ?? maxTpDistanceFor(timeframe));
   }
 
   static TradePlan _build({
@@ -129,6 +200,7 @@ class TradePlanEngine {
     required KeyLevelsResult levels,
     required bool long,
     DateTime? now,
+    double? maxTpDistance,
   }) {
     final entry = candles.last.close;
     final atr = Atr.latest(candles) ?? entry * 0.0015;
@@ -150,6 +222,8 @@ class TradePlanEngine {
       } else if (rawRisk > 3 * atr) {
         stop = entry - 3 * atr;
       }
+      // Absolute risk ceiling, last so it beats the ATR clamps above.
+      if (entry - stop > maxStopDistance) stop = entry - maxStopDistance;
       final risk = entry - stop;
       final resistances = <double>[
         levels.dailyHigh,
@@ -158,10 +232,35 @@ class TradePlanEngine {
         if (levels.prevDayHigh != null) levels.prevDayHigh!,
         if (levels.prevWeekHigh != null) levels.prevWeekHigh!,
       ]..sort();
-      final above =
-          resistances.where((r) => r > entry + 0.25 * risk).toList();
-      final tp1 = above.isNotEmpty ? above[0] : entry + 1.5 * risk;
-      final tp2 = above.length >= 2 ? above[1] : entry + 3 * risk;
+      // Two different ceilings. The hard cap is the day-trade reach limit;
+      // the ATR reach is how far price can plausibly travel before the plan
+      // goes stale. The target is the furthest level inside *both*.
+      final capCeiling =
+          maxTpDistance == null ? double.infinity : entry + maxTpDistance;
+      final tpCeiling =
+          math.min(capCeiling, entry + reachAtrMultiple * atr);
+      final floorPrice = entry + minRewardRisk * risk;
+
+      final inReach = resistances
+          .where((r) => r >= floorPrice && r <= tpCeiling)
+          .toList();
+      // `.last` — the furthest reachable level, not the nearest. A nearer
+      // target leaves money on the table; a further one is not realistically
+      // hit. With no level in reach, aim at the edge of the reach itself,
+      // never closer than the 1R floor.
+      var tp1 = inReach.isNotEmpty
+          ? inReach.last
+          : math.max(floorPrice, tpCeiling);
+      tp1 = math.min(tp1, capCeiling);
+
+      // TP2 is an untracked runner: the next level beyond the target, still
+      // inside the hard cap.
+      final beyond =
+          resistances.where((r) => r > tp1 && r <= capCeiling).toList();
+      var tp2 = beyond.isNotEmpty
+          ? beyond.first
+          : math.min(capCeiling, tp1 + risk);
+      if (tp2 < tp1) tp2 = tp1;
       return TradePlan(
         direction: TradeDirection.long,
         score: analysis.score,
@@ -190,6 +289,8 @@ class TradePlanEngine {
     } else if (rawRisk > 3 * atr) {
       stop = entry + 3 * atr;
     }
+    // Mirror of the long risk ceiling.
+    if (stop - entry > maxStopDistance) stop = entry + maxStopDistance;
     final risk = stop - entry;
     final supports = <double>[
       levels.dailyLow,
@@ -197,9 +298,27 @@ class TradePlanEngine {
       if (levels.prevDayLow != null) levels.prevDayLow!,
       if (levels.prevWeekLow != null) levels.prevWeekLow!,
     ]..sort((a, b) => b.compareTo(a)); // descending
-    final below = supports.where((s) => s < entry - 0.25 * risk).toList();
-    final tp1 = below.isNotEmpty ? below[0] : entry - 1.5 * risk;
-    final tp2 = below.length >= 2 ? below[1] : entry - 3 * risk;
+    // Mirror of the long logic.
+    final capFloor =
+        maxTpDistance == null ? double.negativeInfinity : entry - maxTpDistance;
+    final tpFloor = math.max(capFloor, entry - reachAtrMultiple * atr);
+    final ceilingPrice = entry - minRewardRisk * risk;
+
+    // `supports` is sorted descending, so `.last` is again the furthest.
+    final inReach = supports
+        .where((s) => s <= ceilingPrice && s >= tpFloor)
+        .toList();
+    var tp1 = inReach.isNotEmpty
+        ? inReach.last
+        : math.min(ceilingPrice, tpFloor);
+    tp1 = math.max(tp1, capFloor);
+
+    final beyond =
+        supports.where((s) => s < tp1 && s >= capFloor).toList();
+    var tp2 = beyond.isNotEmpty
+        ? beyond.first
+        : math.max(capFloor, tp1 - risk);
+    if (tp2 > tp1) tp2 = tp1;
     return TradePlan(
       direction: TradeDirection.short,
       score: analysis.score,

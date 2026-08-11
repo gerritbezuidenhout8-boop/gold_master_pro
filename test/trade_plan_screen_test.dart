@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:gold_master_pro/ai/trade_plan_engine.dart';
 import 'package:gold_master_pro/core/theme/app_theme.dart';
 import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
@@ -95,7 +96,10 @@ void main() {
 
     expect(find.text('NO HIGH-CONVICTION SIGNAL'), findsOneWidget);
     expect(find.text('BUY SIGNAL'), findsNothing);
-    expect(find.textContaining('≥ 80'), findsOneWidget);
+    expect(
+        find.textContaining(
+            '≥ ${TradePlanEngine.defaultBullishThreshold}'),
+        findsOneWidget);
     // Flat is a real state: nothing was opened.
     expect(SignalController.instance.active, isNull);
     expect(SignalController.instance.signals, isEmpty);

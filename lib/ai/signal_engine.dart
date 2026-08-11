@@ -33,10 +33,17 @@ class SignalEngine {
     if (!signal.isOpen) return null;
     final at = (now ?? DateTime.now().toUtc()).toUtc();
     final plan = signal.plan;
+    // Ratchet before testing: a tick that sets a new extreme moves the stop
+    // up behind it, and can never be the tick that hits it.
+    final advanced = signal.withPeak(price);
+    final stop = advanced.trailingStop;
+    final stopOutcome = advanced.isTrailing
+        ? SignalOutcome.trailingStop
+        : SignalOutcome.stopLoss;
     if (signal.isLong) {
-      if (price <= plan.stop) {
+      if (price <= stop) {
         return SignalResolution(
-            outcome: SignalOutcome.stopLoss, exitPrice: plan.stop, at: at);
+            outcome: stopOutcome, exitPrice: stop, at: at);
       }
       if (price >= plan.tp1) {
         return SignalResolution(
@@ -44,15 +51,28 @@ class SignalEngine {
       }
       return null;
     }
-    if (price >= plan.stop) {
-      return SignalResolution(
-          outcome: SignalOutcome.stopLoss, exitPrice: plan.stop, at: at);
+    if (price >= stop) {
+      return SignalResolution(outcome: stopOutcome, exitPrice: stop, at: at);
     }
     if (price <= plan.tp1) {
       return SignalResolution(
           outcome: SignalOutcome.takeProfit, exitPrice: plan.tp1, at: at);
     }
     return null;
+  }
+
+  /// [signal] with its peak advanced over [candles] — so on launch the trail
+  /// resumes where the market left it instead of resetting to entry.
+  static TradeSignal advanceOverCandles(
+    TradeSignal signal,
+    List<Candle> candles,
+  ) {
+    var running = signal;
+    for (final c in candles) {
+      if (c.time.isBefore(signal.openedAt)) continue;
+      running = running.withPeak(signal.isLong ? c.high : c.low);
+    }
+    return running;
   }
 
   /// Replays [candles] recorded since the signal opened, so a trade that
@@ -67,17 +87,22 @@ class SignalEngine {
   ) {
     if (!signal.isOpen) return null;
     final plan = signal.plan;
+    var running = signal;
     for (final c in candles) {
       if (c.time.isBefore(signal.openedAt)) continue;
-      final hitStop =
-          signal.isLong ? c.low <= plan.stop : c.high >= plan.stop;
+      // Test against the trail as it stood *entering* this bar. Intrabar
+      // order is unknowable, so the bar's own new high never gets credited
+      // with having lifted the stop before price came back to hit it.
+      final stop = running.trailingStop;
+      final stopOutcome = running.isTrailing
+          ? SignalOutcome.trailingStop
+          : SignalOutcome.stopLoss;
+      final hitStop = signal.isLong ? c.low <= stop : c.high >= stop;
       final hitTarget =
           signal.isLong ? c.high >= plan.tp1 : c.low <= plan.tp1;
       if (hitStop) {
         return SignalResolution(
-            outcome: SignalOutcome.stopLoss,
-            exitPrice: plan.stop,
-            at: c.time);
+            outcome: stopOutcome, exitPrice: stop, at: c.time);
       }
       if (hitTarget) {
         return SignalResolution(
@@ -85,6 +110,7 @@ class SignalEngine {
             exitPrice: plan.tp1,
             at: c.time);
       }
+      running = running.withPeak(signal.isLong ? c.high : c.low);
     }
     return null;
   }

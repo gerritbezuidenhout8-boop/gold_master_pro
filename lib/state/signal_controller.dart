@@ -20,7 +20,10 @@ class SignalController extends ChangeNotifier {
   static SignalController instance = SignalController();
 
   /// How many closed signals are kept.
-  static const int historyLimit = 25;
+  /// How many closed signals are kept. Raised from 25 in v1.1.4 so the Signal
+  /// Journal is a real record rather than a recent-few list; a signal is a
+  /// small JSON object, so the storage cost is negligible.
+  static const int historyLimit = 200;
 
   final SignalStore _store;
   List<TradeSignal> _signals = []; // newest first
@@ -45,10 +48,10 @@ class SignalController extends ChangeNotifier {
   /// True when a fresh plan may be issued — i.e. nothing is running.
   bool get canIssue => active == null;
 
-  int get wins =>
-      history.where((s) => s.outcome == SignalOutcome.takeProfit).length;
-  int get losses =>
-      history.where((s) => s.outcome == SignalOutcome.stopLoss).length;
+  // Counted on the result, not the level: a trailing stop that closed above
+  // entry is a win even though a stop is what closed it.
+  int get wins => history.where((s) => s.isWin).length;
+  int get losses => history.where((s) => !s.isWin).length;
 
   /// Sum of closed results in R.
   double get totalR =>
@@ -84,8 +87,23 @@ class SignalController extends ChangeNotifier {
     final open = active;
     if (open == null) return null;
     final res = SignalEngine.resolve(open, price, now: now);
-    if (res == null) return null;
-    return _apply(open, res);
+    // Keep the ratcheted peak even on ticks that do not close the trade —
+    // otherwise the trail would reset on every tick. `withPeak` returns the
+    // same instance when price is not a new extreme, so a quiet tick costs
+    // nothing and never writes.
+    final advanced = open.withPeak(price);
+    if (res == null) {
+      if (!identical(advanced, open)) _replace(open, advanced);
+      return null;
+    }
+    return _apply(advanced, res);
+  }
+
+  void _replace(TradeSignal open, TradeSignal next) {
+    final i = _signals.indexWhere((s) => s.id == open.id);
+    if (i >= 0) _signals[i] = next;
+    notifyListeners();
+    _persist();
   }
 
   /// Replays [candles] so a signal that completed while the app was closed
@@ -94,7 +112,13 @@ class SignalController extends ChangeNotifier {
     final open = active;
     if (open == null) return null;
     final res = SignalEngine.resolveFromCandles(open, candles);
-    if (res == null) return null;
+    if (res == null) {
+      // Nothing closed, but the market moved while the app was shut — resume
+      // the trail where it left off rather than restarting it at entry.
+      final advanced = SignalEngine.advanceOverCandles(open, candles);
+      if (!identical(advanced, open)) _replace(open, advanced);
+      return null;
+    }
     return _apply(open, res);
   }
 

@@ -1,8 +1,10 @@
 import '../ai/gold_master_engine.dart';
+import '../ai/news_guard.dart';
 import '../ai/trade_plan_engine.dart';
 import '../indicators/key_levels.dart';
 import '../models/candle.dart';
 import '../models/trade_signal.dart';
+import '../services/economic_calendar.dart';
 import '../services/market_data.dart';
 import 'signal_controller.dart';
 
@@ -22,9 +24,13 @@ class PlanScout {
     this.signals,
     this.minInterval = const Duration(minutes: 1),
     this.dailyCacheTtl = const Duration(minutes: 15),
-    this.bullishThreshold = 80,
-    this.bearishThreshold = 20,
-  });
+    this.bullishThreshold = TradePlanEngine.defaultBullishThreshold,
+    this.bearishThreshold = TradePlanEngine.defaultBearishThreshold,
+    CalendarFetcher? calendar,
+  }) : _calendar = calendar ?? EconomicCalendar.fetchThisWeek;
+
+  /// Injectable for tests; defaults to the live weekly calendar.
+  final CalendarFetcher _calendar;
 
   /// Injected seams. Null means "use the app-wide singleton", resolved lazily
   /// below rather than here so a later `MarketData.instance` swap still wins.
@@ -48,6 +54,8 @@ class PlanScout {
   DateTime? _lastScan;
   List<Candle>? _cachedDaily;
   DateTime? _cachedDailyAt;
+  List<EconomicEvent>? _cachedNews;
+  DateTime? _cachedNewsAt;
   bool _busy = false;
 
   /// When the last completed scan ran; null before the first.
@@ -81,6 +89,11 @@ class PlanScout {
       final d1 = await _daily(at);
       if (d1.isEmpty) return null;
 
+      // Stand aside around high-impact US releases: the spike is not
+      // something the technicals priced in, and being flat through it is the
+      // safest way to protect the record.
+      if (NewsGuard.blocking(await _news(at), at) != null) return null;
+
       final analysis = GoldMasterEngine.analyze(h1: h1, d1: d1);
       final plan = TradePlanEngine.generate(
         analysis: analysis,
@@ -89,6 +102,7 @@ class PlanScout {
         bullishThreshold: bullishThreshold,
         bearishThreshold: bearishThreshold,
         now: at,
+        timeframe: 'H1',
       );
       if (plan == null) return null;
       // issue() re-checks the one-at-a-time gate and returns null if the
@@ -99,6 +113,32 @@ class PlanScout {
     } finally {
       _lastScan = at;
       _busy = false;
+    }
+  }
+
+  /// This week's calendar, cached on the same TTL as the daily candles — the
+  /// week's schedule does not change minute to minute. Failures return an
+  /// empty list, which means "no known event": the scout must never die for
+  /// want of a calendar, and the technicals still gate the trade.
+  Future<List<EconomicEvent>> _news(DateTime at) async {
+    final cached = _cachedNews;
+    final cachedAt = _cachedNewsAt;
+    if (cached != null &&
+        cachedAt != null &&
+        at.difference(cachedAt) < dailyCacheTtl) {
+      return cached;
+    }
+    try {
+      final fresh = await _calendar();
+      _cachedNews = fresh;
+      _cachedNewsAt = at;
+      return fresh;
+    } catch (_) {
+      // Deliberately catches Error as well as Exception: the bundled-asset
+      // fallback throws an Error when there is no Flutter binding, and this
+      // runs inside a stream listener that must not die. No calendar simply
+      // means no known event.
+      return const [];
     }
   }
 

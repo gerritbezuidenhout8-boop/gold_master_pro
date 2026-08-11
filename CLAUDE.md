@@ -43,7 +43,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; **187 tests** (v1.1.3) |
+| `flutter analyze` / `flutter test` | keep both green; **237 tests** (v1.1.4) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -116,11 +116,55 @@ draft release behind.
   narrates computed numbers, never invents them. `analyze()` takes
   `intradayName`/`intradayWord` so it can run on any intraday TF (Analysis
   screen runs it across M5/M15/M30/H1; Home keeps hourly defaults).
+- `ai/news_guard.dart` — pure news blackout, **v1.1.4**. `blocking()` returns
+  the soonest high-impact **USD** `EconomicEvent` within `quietBefore` (30
+  min) / `quietAfter` (15 min) of now; window edges count as blocked. Gold's
+  worst whipsaws are around NFP/CPI/FOMC and the technicals cannot price them
+  in, so `PlanScout` refuses to open a trade inside one. The calendar is
+  cached on the daily TTL and `_news()` **catches `Error` as well as
+  `Exception`** — the bundled-asset fallback throws an `Error` with no
+  Flutter binding, and the scout runs in a stream listener that must not die.
+  No calendar simply means no known event. Tests must pass
+  `calendar:` (see the test gotchas) or they hit the network.
+- `screens/signal_journal/` — **v1.1.4**, Home drawer. The full record: every
+  signal newest-first with entry/stop/target/exit, outcome pill, R, and a
+  win-rate summary. A running signal reads gold ("Running"), not green/red,
+  because nothing is decided yet; a trailed stop shows `original → trailed`.
+  `SignalController.historyLimit` raised 25 → **200** so this is a record
+  rather than a recent-few list.
 - `ai/trade_plan_engine.dart` — turns a high-conviction score into a
-  concrete plan: LONG at score ≥ 80, SHORT at ≤ 20, else null (no signal).
+  concrete plan: LONG at score ≥ `defaultBullishThreshold` (**85**), SHORT at
+  ≤ `defaultBearishThreshold` (**15**), else null (no signal). Raised from
+  80/20 in v1.1.4 — fewer setups, each with a clearer edge. **All tuning
+  constants live here** (`minRewardRisk`, `trailRiskMultiple`, `maxStopPips`,
+  `intradayMaxTpPips`); `PlanScout` and `TradePlanScreen` default to them
+  rather than repeating literals.
   Entry near price, stop = recent swing ± buffer clamped to [0.8,3]×ATR
-  (`indicators/atr.dart`, Wilder), TP1/TP2 = nearest key levels beyond
-  entry with R-multiple fallback. `screens/trade_plan/` renders it
+  (`indicators/atr.dart`, Wilder) and then to a hard **`maxStopPips` = 500
+  pips ($50)** ceiling applied *last*, so a volatile session can never widen
+  risk past it (it can therefore override the 0.8×ATR floor — deliberate).
+  Note this caps loss **size**, not loss **frequency**: a tighter stop sits
+  closer to price and is hit more often. TP1/TP2 = nearest key levels beyond
+  entry, floored at **`minRewardRisk` = 1R** (never risk more than you aim to
+  make, and never a target too close to be worth taking) and then taking the
+  **furthest** level still inside `reachAtrMultiple` × ATR (2×) — the reach is
+  ATR-based because what counts as "realistically hit" depends entirely on how
+  much gold is moving. A nearer target leaves money on the table, a further
+  one is not hit. TP2 is the next level beyond TP1 within the hard cap.
+  **v1.1.4 —
+  day-trade reach cap:** on intraday timeframes
+  (`intradayTimeframes` = M1/M5/M15/M30/**H1**) a target may
+  not sit more than `intradayMaxTpPips` (2000 pips = **$200**, since XAUUSD
+  pips are `pipSize` $0.10) from entry — entry 4020 targets at most 4220.
+  Levels beyond the cap are filtered out *before* TP selection, so the plan
+  falls back to a reachable R-multiple target instead of aiming at the
+  all-time high; the R-multiple fallbacks are then clamped too, and TP2 is
+  held at or beyond TP1 so `rr2` is never below `rr1`. **H4/D1/W1 stay
+  exempt** — a swing can afford the distance. Pass `timeframe:` to
+  `generate()` (or `maxTpDistance:` to override); all three call sites do.
+  H1 was exempt when the cap shipped, which meant it changed nothing about
+  the signals actually received (the Trade Plan screen and `PlanScout` both
+  analyse H1) — don't reintroduce that. `screens/trade_plan/` renders it
   (mockup screen 8); reached by tapping Home's AI Recommendation card.
   Education/analysis only — disclaimer on the screen. **`generate()` is the
   only entry point: the 80/20 gate is deliberate and flat is a valid state
@@ -139,6 +183,24 @@ draft release behind.
   Custom indicators cache per-candle values in an **Expando keyed by
   entity**, so the indicator instances MUST be the same objects in
   `prepare()` (calc) and the widget (draw) — they're static on GmpChart.
+  **v1.1.4 — the sliver-candles fix: bucket every candle time.** Yahoo
+  appends the live quote as a final data point stamped with the *current
+  second* rather than the bar boundary, and `mergeCandle` appends whenever a
+  newer time arrives — so every 10 s poll grew a new thin bar instead of
+  filling out the forming one (M15 showed a dozen bars in 12 minutes).
+  `floorToTimeframe`/`bucketCandle`/`normalizeCandles` (pure, tested, in
+  `market_data.dart`) snap every candle to its bar start, in `fetchCandles`
+  **and** `candleStream`, on both the Yahoo and PAXG paths. W1 snaps to
+  Monday 00:00 UTC to match `KeyLevels`; D1 to UTC midnight; everything else
+  by epoch arithmetic. **Never emit a candle whose time is not a bar
+  boundary.** ChartScreen shows a per-timeframe **close countdown** in the
+  AppBar, driven by the existing 1 s throttle timer (it must tick whether or
+  not price moved). The running signal's entry / trailing stop / TP1 / TP2
+  are drawn as TradingView **price lines** (`signalPriceLines` →
+  `payload['priceLines']`, applied in `chart.html`): always present so a
+  closed trade clears its lines, removed-and-recreated each update because
+  price lines have no bulk-update API, and `ChartWidget` compares `signal`
+  identity in `didUpdateWidget` so a ratcheting stop redraws.
   **v1.1.0: ChartScreen folds each live spot tick into the forming candle
   (`_onSpot`, throttled); StochRSI value shows both on the `IndicatorBar`
   and as an on-chart `#readout` overlay in chart.html.** Gotcha: the browser
@@ -194,8 +256,23 @@ draft release behind.
   it. `ai/signal_engine.dart` is the pure rule, applied two ways:
   `resolve()` on a live tick and `resolveFromCandles()` replayed on launch
   so a trade that completed while the app was shut still settles. Exits
-  book **at the level** (clean +rr1 / −1R); a bar touching **both** levels
-  counts as the stop, never flattering the record. `models/trade_signal.dart`
+  book **at the level**; a bar touching **both** levels counts as the stop,
+  never flattering the record. **v1.1.4 — trailing stop.** `TradeSignal`
+  carries a `recordedPeak` water mark (read via `peak`, defaulting to entry
+  so pre-v1.1.4 stored signals still load) that only ever ratchets via
+  `withPeak`. `trailingStop` = the plan stop until price has advanced 1R,
+  then `peak ∓ risk`: entry 4020 / stop 4000 (1R = 20) gives stop 4020 at
+  price 4040 and 4040 at 4060. Past 1R the stop sits above entry, so a
+  pullback closes **in profit** — hence a third outcome
+  `SignalOutcome.trailingStop`, and `wins`/`losses` now count **realised
+  money** (`TradeSignal.isWin`) rather than which level was hit; the old
+  `SignalOutcomeLabel.isWin` is gone. In candle replay the stop is tested
+  against the trail as it stood *entering* the bar, so a bar's own new high
+  never gets credited with lifting the stop before price returned to it.
+  `SignalController.onPrice` persists the ratchet (`withPeak` returns the
+  same instance on a non-extreme tick, so quiet ticks never write), and
+  `reconcile` calls `SignalEngine.advanceOverCandles` so the trail resumes
+  after a restart instead of resetting to entry. `models/trade_signal.dart`
   stores the plan **by value** so a closed signal keeps the levels it was
   judged on. Persisted via `services/signal_store.dart`
   (`gmp-signals-v1`). `AlertWatcher` feeds prices to both controllers —
@@ -221,7 +298,9 @@ draft release behind.
   periodic timer). Keep new per-tick work behind that throttle.
 - **Tests:** widget tests must swap `MarketData.instance`,
   `Watchlist.fetch`, `AlertsController.instance` (real sockets/timers
-  fail the pending-timer invariant) and set
+  fail the pending-timer invariant), pass `calendar:` to any `PlanScout`
+  (its default is the live weekly fetch, so an un-injected scout reaches the
+  network — and in a non-widget test the asset fallback throws), and set
   `SharedPreferences.setMockInitialValues`. Dispose trees with
   `pumpWidget(SizedBox())`. ListViews virtualize — `scrollUntilVisible`
   before asserting below-fold. `SectionLabel`/`GmpPill` UPPERCASE their

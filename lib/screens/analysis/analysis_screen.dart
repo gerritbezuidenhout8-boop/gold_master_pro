@@ -132,7 +132,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       // the neutral middle.
       _signal = (tfAnalysis != null && levels != null && candles.isNotEmpty)
           ? TradePlanEngine.generate(
-              analysis: tfAnalysis, candles: candles, levels: levels)
+              analysis: tfAnalysis,
+              candles: candles,
+              levels: levels,
+              // Sub-hour reads are day trades: the target is held within
+              // TradePlanEngine.intradayMaxTpPips of entry.
+              timeframe: tf)
           : null;
       _recentDiv = divs.isNotEmpty && divs.last.index >= candles.length - 10
           ? divs.last

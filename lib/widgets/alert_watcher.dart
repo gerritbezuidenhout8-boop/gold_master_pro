@@ -121,7 +121,7 @@ class _AlertWatcherState extends State<AlertWatcher> {
   }
 
   void _announceClose(TradeSignal signal) {
-    final win = signal.outcome?.isWin ?? false;
+    final win = signal.isWin;
     final r = signal.rMultiple;
     final text = 'Signal closed: ${signal.plan.action} '
         '${signal.outcome?.label.toLowerCase()} at '

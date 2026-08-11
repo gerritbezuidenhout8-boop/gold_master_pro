@@ -25,8 +25,8 @@ import '../../widgets/score_gauge.dart';
 class TradePlanScreen extends StatefulWidget {
   const TradePlanScreen({
     super.key,
-    this.bullishThreshold = 80,
-    this.bearishThreshold = 20,
+    this.bullishThreshold = TradePlanEngine.defaultBullishThreshold,
+    this.bearishThreshold = TradePlanEngine.defaultBearishThreshold,
   });
 
   final int bullishThreshold;
@@ -84,6 +84,8 @@ class _TradePlanScreenState extends State<TradePlanScreen> {
           levels: levels,
           bullishThreshold: widget.bullishThreshold,
           bearishThreshold: widget.bearishThreshold,
+          // H1 is exempt from the day-trade take-profit cap by design.
+          timeframe: 'H1',
         );
         if (plan != null) await signals.issue(plan);
       }
@@ -226,13 +228,26 @@ class _TradePlanScreenState extends State<TradePlanScreen> {
             Text(
               'Take ${plan.action.toLowerCase()} trade at '
               '${formatPrice(plan.entry)} · TP at ${formatPrice(plan.tp1)} · '
-              'SL at ${formatPrice(plan.stop)}',
+              // The live stop, which ratchets as price runs in favour.
+              'SL at ${formatPrice(signal.trailingStop)}',
               style: const TextStyle(
                   fontSize: 14,
                   height: 1.4,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textPrimary),
             ),
+            if (signal.isTrailing) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Trailing stop · moved ${long ? 'up' : 'down'} from '
+                '${formatPrice(plan.stop)} behind a '
+                '${long ? 'high' : 'low'} of ${formatPrice(signal.peak)} — '
+                'this trade is now protected at '
+                '${formatPrice(signal.trailingStop)}.',
+                style: TextStyle(
+                    fontSize: 12, height: 1.4, color: color),
+              ),
+            ],
             const SizedBox(height: 6),
             Text(
               '${plan.convictionLabel} conviction · opened '
@@ -443,7 +458,7 @@ class _TradePlanScreenState extends State<TradePlanScreen> {
   }
 
   Widget _historyRow(TradeSignal s) {
-    final win = s.outcome?.isWin ?? false;
+    final win = s.isWin;
     final color = win ? AppTheme.bull : AppTheme.bear;
     final r = s.rMultiple;
     return Padding(

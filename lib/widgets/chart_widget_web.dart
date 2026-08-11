@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import '../models/candle.dart';
+import '../models/trade_signal.dart';
 import 'tv_payload.dart';
 
 /// TradingView Lightweight Charts renderer for Flutter web: the bundled
@@ -19,6 +20,7 @@ class ChartWidget extends StatefulWidget {
     required this.timeframe,
     required this.showStochRsi,
     required this.showDivergence,
+    this.signal,
     this.onEngineFailed,
   });
 
@@ -26,6 +28,10 @@ class ChartWidget extends StatefulWidget {
   final String timeframe;
   final bool showStochRsi;
   final bool showDivergence;
+
+  /// The running signal, drawn as entry / stop / target price lines. Null
+  /// when the desk is flat.
+  final TradeSignal? signal;
   final VoidCallback? onEngineFailed;
 
   @override
@@ -62,7 +68,10 @@ class _ChartWidgetState extends State<ChartWidget> {
     if (refit ||
         !identical(old.candles, widget.candles) ||
         old.showStochRsi != widget.showStochRsi ||
-        old.showDivergence != widget.showDivergence) {
+        old.showDivergence != widget.showDivergence ||
+        // A ratcheting stop changes the line's price without changing the
+        // candles, so the signal has to be compared on its own.
+        !identical(old.signal, widget.signal)) {
       _push(fit: refit);
     }
   }
@@ -78,6 +87,8 @@ class _ChartWidgetState extends State<ChartWidget> {
       widget.candles,
       stochRsi: widget.showStochRsi,
       divergence: widget.showDivergence,
+      signal: widget.signal,
+      timeframe: widget.timeframe,
     ));
     (gmp as JSObject).callMethod('setAll'.toJS, json.toJS, fit.toJS);
   }

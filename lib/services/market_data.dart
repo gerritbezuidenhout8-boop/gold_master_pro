@@ -190,6 +190,80 @@ SpotQuote? quoteFromGoldApi(Map<String, dynamic> body) {
   );
 }
 
+/// Bar length of [timeframe].
+Duration timeframeDuration(String timeframe) => switch (timeframe) {
+      'M1' => const Duration(minutes: 1),
+      'M5' => const Duration(minutes: 5),
+      'M15' => const Duration(minutes: 15),
+      'M30' => const Duration(minutes: 30),
+      'H1' => const Duration(hours: 1),
+      'H4' => const Duration(hours: 4),
+      'D1' => const Duration(days: 1),
+      'W1' => const Duration(days: 7),
+      _ => throw ArgumentError.value(
+          timeframe, 'timeframe', 'unknown timeframe'),
+    };
+
+/// Start of the [timeframe] bar containing [time], in UTC.
+///
+/// Every candle time is snapped to this before it reaches the chart. Feeds
+/// do not agree on what the newest bar's timestamp means — Yahoo appends the
+/// live quote as a final point stamped with the *current second* rather than
+/// the bar boundary — and since [mergeCandle] appends whenever a newer time
+/// arrives, an un-snapped feed grows a new sliver of a bar on every poll
+/// instead of filling out the one that is forming.
+DateTime floorToTimeframe(DateTime time, String timeframe) {
+  final t = time.toUtc();
+  switch (timeframe) {
+    case 'W1':
+      // Weeks start Monday 00:00 UTC, matching KeyLevels — epoch flooring
+      // would put them on a Thursday.
+      final day = DateTime.utc(t.year, t.month, t.day);
+      return day.subtract(Duration(days: (day.weekday - DateTime.monday) % 7));
+    case 'D1':
+      return DateTime.utc(t.year, t.month, t.day);
+    default:
+      final step = timeframeDuration(timeframe).inMilliseconds;
+      final ms = t.millisecondsSinceEpoch;
+      return DateTime.fromMillisecondsSinceEpoch(ms - ms.remainder(step),
+          isUtc: true);
+  }
+}
+
+/// [candle] with its time snapped to the [timeframe] bar it belongs to.
+Candle bucketCandle(Candle candle, String timeframe) => Candle(
+      time: floorToTimeframe(candle.time, timeframe),
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+    );
+
+/// Snaps every candle to its [timeframe] bar and folds bars that land in the
+/// same one into a single OHLC — which is what collapses a feed's trailing
+/// live point back into the bar it belongs to.
+List<Candle> normalizeCandles(List<Candle> candles, String timeframe) {
+  final out = <Candle>[];
+  for (final c in candles) {
+    final t = floorToTimeframe(c.time, timeframe);
+    if (out.isNotEmpty && out.last.time.isAtSameMomentAs(t)) {
+      final prev = out.last;
+      out[out.length - 1] = Candle(
+        time: t,
+        open: prev.open, // the bar keeps the open it started with
+        high: prev.high > c.high ? prev.high : c.high,
+        low: prev.low < c.low ? prev.low : c.low,
+        close: c.close, // and the most recent close
+        volume: prev.volume + c.volume,
+      );
+    } else {
+      out.add(bucketCandle(c, timeframe));
+    }
+  }
+  return out;
+}
+
 /// Replace-or-append [update] by candle open time; ignores stale updates
 /// and caps the list at [maxLength].
 List<Candle> mergeCandle(List<Candle> candles, Candle update,

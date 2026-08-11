@@ -1,12 +1,18 @@
+import 'dart:math' as math;
+
 import '../ai/trade_plan_engine.dart';
 
-/// How a signal finished.
-enum SignalOutcome { takeProfit, stopLoss }
+/// How a signal finished. [trailingStop] is a stop that had ratcheted above
+/// (long) or below (short) its original level, so it can close in profit —
+/// which is why wins are judged on money, not on which level was hit.
+enum SignalOutcome { takeProfit, stopLoss, trailingStop }
 
 extension SignalOutcomeLabel on SignalOutcome {
-  String get label =>
-      this == SignalOutcome.takeProfit ? 'Take profit' : 'Stop loss';
-  bool get isWin => this == SignalOutcome.takeProfit;
+  String get label => switch (this) {
+        SignalOutcome.takeProfit => 'Take profit',
+        SignalOutcome.stopLoss => 'Stop loss',
+        SignalOutcome.trailingStop => 'Trailing stop',
+      };
 }
 
 /// One issued signal and its lifecycle: the plan snapshot taken when it was
@@ -20,6 +26,7 @@ class TradeSignal {
     required this.id,
     required this.plan,
     required this.openedAt,
+    this.recordedPeak,
     this.outcome,
     this.exitPrice,
     this.closedAt,
@@ -28,6 +35,50 @@ class TradeSignal {
   final String id;
   final TradePlan plan;
   final DateTime openedAt;
+
+  /// Raw water mark as stored: null before the first ratchet, and on signals
+  /// persisted before trailing existed. Read [peak] instead.
+  final double? recordedPeak;
+
+  /// Best price reached in the trade's favour since it opened — the high
+  /// water mark for a long, the low water mark for a short. Defaults to the
+  /// entry, so a signal stored before trailing existed simply starts its
+  /// trail from entry rather than breaking.
+  double get peak => recordedPeak ?? plan.entry;
+
+  /// How far the stop trails behind [peak], in price. See
+  /// [TradePlanEngine.trailRiskMultiple] for why it is 1.5R and not 1R.
+  double get trailDistance =>
+      plan.risk * TradePlanEngine.trailRiskMultiple;
+
+  /// The stop actually in force. It starts at the plan's stop and ratchets in
+  /// the trade's favour as [peak] advances, never moving against the trade.
+  ///
+  /// Entry 4020 with a stop at 4000 is a 20 risk, so the trail sits 30 (1.5R)
+  /// behind the best price: at 4060 the stop is 4030. Once price has advanced
+  /// past 1.5R the stop is above entry and a pullback closes in profit.
+  double get trailingStop => isLong
+      ? math.max(plan.stop, peak - trailDistance)
+      : math.min(plan.stop, peak + trailDistance);
+
+  /// Whether the stop has ratcheted away from its original level.
+  bool get isTrailing => trailingStop != plan.stop;
+
+  /// This signal with [peak] advanced by [price], or itself when [price] is
+  /// not a new extreme. The stop never retreats, so this only ever ratchets.
+  TradeSignal withPeak(double price) {
+    final next = isLong ? math.max(peak, price) : math.min(peak, price);
+    if (next == peak) return this;
+    return TradeSignal(
+      id: id,
+      plan: plan,
+      openedAt: openedAt,
+      recordedPeak: next,
+      outcome: outcome,
+      exitPrice: exitPrice,
+      closedAt: closedAt,
+    );
+  }
 
   /// Null while the signal is still running.
   final SignalOutcome? outcome;
@@ -44,6 +95,10 @@ class TradeSignal {
   /// Realised move once closed, else null.
   double? get realised =>
       exitPrice == null ? null : unrealised(exitPrice!);
+
+  /// Judged on money, not on which level was hit: a trailing stop can close
+  /// in profit, and that counts as a win.
+  bool get isWin => (realised ?? 0) > 0;
 
   /// Result in R (risk multiples) once closed, else null.
   double? get rMultiple {
@@ -69,6 +124,7 @@ class TradeSignal {
         id: id,
         plan: plan,
         openedAt: openedAt,
+        recordedPeak: recordedPeak,
         outcome: outcome,
         exitPrice: exitPrice,
         closedAt: at,
@@ -78,6 +134,7 @@ class TradeSignal {
         'id': id,
         'plan': plan.toMap(),
         'openedAt': openedAt.toIso8601String(),
+        'peak': peak,
         if (outcome != null) 'outcome': outcome!.name,
         if (exitPrice != null) 'exitPrice': exitPrice,
         if (closedAt != null) 'closedAt': closedAt!.toIso8601String(),
@@ -87,9 +144,13 @@ class TradeSignal {
         id: m['id'] as String,
         plan: TradePlan.fromMap((m['plan'] as Map).cast<String, dynamic>()),
         openedAt: DateTime.parse(m['openedAt'] as String).toUtc(),
+        // Absent on signals stored before trailing existed — peak falls back
+        // to the entry, which just restarts the trail.
+        recordedPeak: (m['peak'] as num?)?.toDouble(),
         outcome: switch (m['outcome']) {
           'takeProfit' => SignalOutcome.takeProfit,
           'stopLoss' => SignalOutcome.stopLoss,
+          'trailingStop' => SignalOutcome.trailingStop,
           _ => null,
         },
         exitPrice: (m['exitPrice'] as num?)?.toDouble(),

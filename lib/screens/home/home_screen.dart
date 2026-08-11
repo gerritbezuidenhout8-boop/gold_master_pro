@@ -12,6 +12,7 @@ import '../../widgets/score_gauge.dart';
 import '../../widgets/stat_tile.dart';
 import '../about/about_screen.dart';
 import '../calendar/economic_calendar_screen.dart';
+import '../signal_journal/signal_journal_screen.dart';
 import '../settings/settings_screen.dart';
 import '../trade_plan/trade_plan_screen.dart';
 
@@ -403,6 +404,18 @@ class _HomeDrawer extends StatelessWidget {
                 Navigator.pop(context);
                 Navigator.of(context).push(MaterialPageRoute<void>(
                     builder: (_) => const EconomicCalendarScreen()));
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.fact_check_outlined, color: AppTheme.gold),
+              title: const Text('Signal Journal'),
+              subtitle: const Text('Every signal and how it finished',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const SignalJournalScreen()));
               },
             ),
             ListTile(

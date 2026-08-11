@@ -12,6 +12,7 @@ import '../../models/candle.dart';
 import '../../models/spot_quote.dart';
 import '../../services/market_data.dart';
 import '../../services/spot_gold_data.dart';
+import '../../state/signal_controller.dart';
 import '../../widgets/bottom_trade_panel.dart';
 import '../../widgets/chart_widget.dart';
 import '../../widgets/gmp_chart.dart';
@@ -78,11 +79,36 @@ class _ChartScreenState extends State<ChartScreen> {
     // Owned by the screen, not by _load: when a load failed, the throttle
     // used to never start, so the chart stayed frozen even after a retry.
     _throttle = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_dirty && mounted) {
+      if (!mounted) return;
+      if (_dirty) {
         _dirty = false;
         _rebuild();
       }
+      // The bar countdown has to tick every second whether or not price
+      // moved, so it is driven here rather than by the quote stream.
+      final left = _barTimeLeft();
+      if (left != _timeLeft) setState(() => _timeLeft = left);
     });
+  }
+
+  /// Time until the forming bar closes, e.g. 07:12 on M15.
+  Duration _barTimeLeft() {
+    final now = DateTime.now().toUtc();
+    final bar = timeframeDuration(_timeframe);
+    final opened = floorToTimeframe(now, _timeframe);
+    return opened.add(bar).difference(now);
+  }
+
+  Duration _timeLeft = Duration.zero;
+
+  static String _formatCountdown(Duration d) {
+    if (d.isNegative) return '00:00';
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    two(int v) => v.toString().padLeft(2, '0');
+    // Hours only when there are any — D1/W1 would be unreadable otherwise.
+    return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
   }
 
   @override
@@ -196,7 +222,44 @@ class _ChartScreenState extends State<ChartScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('${AppConstants.symbol} · $_timeframe')),
+      appBar: AppBar(
+        title: Text('${AppConstants.symbol} · $_timeframe'),
+        actions: [
+          // Time left on the forming bar. Without it there is no way to tell
+          // a bar that is still filling out from one that has closed.
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceAlt,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.hairline),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.timer_outlined,
+                        size: 13, color: AppTheme.gold),
+                    const SizedBox(width: 5),
+                    Text(
+                      _formatCountdown(_timeLeft),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                        color: AppTheme.gold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           TimeframeSelector(
@@ -253,12 +316,19 @@ class _ChartScreenState extends State<ChartScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_useTv) {
-      return ChartWidget(
-        candles: _candles,
-        timeframe: _timeframe,
-        showStochRsi: _showStochRsi,
-        showDivergence: _showDivergence,
-        onEngineFailed: _onTvEngineFailed,
+      // Rebuild as the controller changes so a ratcheting stop moves its
+      // line; the chart is only redrawn when the signal object itself
+      // changes, so a quiet tick costs nothing.
+      return AnimatedBuilder(
+        animation: SignalController.instance,
+        builder: (context, _) => ChartWidget(
+          candles: _candles,
+          timeframe: _timeframe,
+          showStochRsi: _showStochRsi,
+          showDivergence: _showDivergence,
+          signal: SignalController.instance.active,
+          onEngineFailed: _onTvEngineFailed,
+        ),
       );
     }
     return GmpChart(

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/spot_quote.dart';
 import 'package:gold_master_pro/models/trade_signal.dart';
+import 'package:gold_master_pro/services/economic_calendar.dart';
 import 'package:gold_master_pro/services/market_data.dart';
 import 'package:gold_master_pro/services/signal_store.dart';
 import 'package:gold_master_pro/state/plan_scout.dart';
@@ -75,6 +76,10 @@ List<Candle> _flat(int n, {bool daily = false}) => [
 
 final DateTime _t0 = DateTime.utc(2026, 6, 3, 12);
 
+/// Keeps the scout off the network: an empty calendar means "no known event",
+/// so these tests exercise the technicals alone.
+Future<List<EconomicEvent>> _noNews() async => const [];
+
 void main() {
   late SignalController signals;
 
@@ -84,6 +89,7 @@ void main() {
 
   test('issues a signal when the score clears the 80 gate', () async {
     final scout = PlanScout(
+      calendar: _noNews,
       data: _Fake(bullishH1(), bullishD1()),
       signals: signals,
     );
@@ -96,8 +102,68 @@ void main() {
     expect(signals.active, isNotNull);
   });
 
+  test('the next signal only comes after the running one closes', () async {
+    final scout = PlanScout(
+      calendar: _noNews,
+      data: _Fake(bullishH1(), bullishD1()),
+      signals: signals,
+      minInterval: Duration.zero, // throttle must not be what blocks us
+    );
+
+    final first = await scout.scan(now: _t0);
+    expect(first, isNotNull);
+
+    // However often we look, and however good the score, nothing new opens.
+    for (var i = 1; i <= 5; i++) {
+      expect(await scout.scan(now: _t0.add(Duration(minutes: i))), isNull,
+          reason: 'a second signal must not open while one is running');
+    }
+    expect(signals.signals, hasLength(1));
+
+    // Close it at its target; only now is the desk free again.
+    signals.onPrice(first!.plan.tp1);
+    expect(signals.active, isNull);
+    expect(signals.history.single.outcome, SignalOutcome.takeProfit);
+
+    final second = await scout.scan(now: _t0.add(const Duration(minutes: 10)));
+    expect(second, isNotNull);
+    expect(signals.signals, hasLength(2));
+  });
+
+  test('stands aside inside a high-impact news window', () async {
+    // Same bullish fixture that issues a signal above — the only difference
+    // is an NFP print 10 minutes away.
+    final scout = PlanScout(
+      calendar: () async => [
+        EconomicEvent(
+          title: 'Non-Farm Employment Change',
+          country: 'USD',
+          time: _t0.add(const Duration(minutes: 10)),
+          impact: EventImpact.high,
+        ),
+      ],
+      data: _Fake(bullishH1(), bullishD1()),
+      signals: signals,
+    );
+
+    expect(await scout.scan(now: _t0), isNull);
+    expect(signals.active, isNull);
+  });
+
+  test('a calendar fetch that blows up does not stop the scout', () async {
+    final scout = PlanScout(
+      calendar: () async => throw StateError('calendar down'),
+      data: _Fake(bullishH1(), bullishD1()),
+      signals: signals,
+    );
+
+    // No calendar means no known event; the technicals still decide.
+    expect(await scout.scan(now: _t0), isNotNull);
+  });
+
   test('a flat market issues nothing', () async {
     final scout = PlanScout(
+      calendar: _noNews,
       data: _Fake(_flat(60), _flat(30, daily: true)),
       signals: signals,
     );
@@ -109,6 +175,7 @@ void main() {
   test('throttles a second scan inside minInterval', () async {
     final feed = _Fake(bullishH1(), bullishD1());
     final scout = PlanScout(
+      calendar: _noNews,
       data: feed,
       signals: signals,
       minInterval: const Duration(minutes: 1),
@@ -127,6 +194,7 @@ void main() {
   test('will not open a second signal while one is running', () async {
     final feed = _Fake(bullishH1(), bullishD1());
     final scout = PlanScout(
+      calendar: _noNews,
       data: feed,
       signals: signals,
       minInterval: Duration.zero,
@@ -141,6 +209,7 @@ void main() {
   test('reuses the daily fetch inside the cache window', () async {
     final feed = _Fake(_flat(60), _flat(30, daily: true));
     final scout = PlanScout(
+      calendar: _noNews,
       data: feed,
       signals: signals,
       minInterval: Duration.zero,
@@ -157,7 +226,11 @@ void main() {
   });
 
   test('a failing feed returns null instead of throwing', () async {
-    final scout = PlanScout(data: _Broken(), signals: signals);
+    final scout = PlanScout(
+      calendar: _noNews,
+      data: _Broken(),
+      signals: signals,
+    );
 
     expect(await scout.scan(now: _t0), isNull);
     expect(signals.active, isNull);
@@ -167,6 +240,7 @@ void main() {
 
   test('records when it last looked, even when nothing fired', () async {
     final scout = PlanScout(
+      calendar: _noNews,
       data: _Fake(_flat(60), _flat(30, daily: true)),
       signals: signals,
     );

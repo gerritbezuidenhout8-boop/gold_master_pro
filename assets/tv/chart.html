@@ -15,12 +15,24 @@
   }
   #readout .kv { color: #E3B84C; }
   #readout .dv { color: #35CDAC; }
+  /* Bar-close countdown, sat on the price axis directly under the live price
+     label — the position a trader already reads it in. Positioned in JS from
+     priceToCoordinate, because the price scale has no slot to render into. */
+  #countdown {
+    position: absolute; right: 0; z-index: 4; pointer-events: none;
+    display: none; box-sizing: border-box;
+    padding: 2px 4px; min-width: 58px; text-align: center;
+    font: 700 11px/1.25 -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #0A0A0B; background: #25C685;
+  }
+  #countdown.closing { background: #E5484D; color: #FFFFFF; }
 </style>
 <script src="lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div id="c"></div>
 <div id="readout"></div>
+<div id="countdown"></div>
 <script>
 (function () {
   var LWC = LightweightCharts;
@@ -62,7 +74,40 @@
     });
   });
 
-  var stochK = null, stochD = null, markersApi = null;
+  var stochK = null, stochD = null, markersApi = null, priceLines = [];
+
+  // --- bar-close countdown -------------------------------------------------
+  // Driven by an in-page timer rather than a push from Flutter: it has to tick
+  // every second whether or not price moved, and re-pushing the whole payload
+  // once a second would be wasteful.
+  var barCloseAt = null;   // epoch seconds when the forming bar closes
+  var lastClose = null;    // price the label is pinned to
+  var cdEl = document.getElementById('countdown');
+
+  function fmtCountdown(sec) {
+    if (sec < 0) sec = 0;
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = Math.floor(sec % 60);
+    function p(v) { return v < 10 ? '0' + v : '' + v; }
+    return h > 0 ? p(h) + ':' + p(m) + ':' + p(s) : p(m) + ':' + p(s);
+  }
+
+  function drawCountdown() {
+    if (barCloseAt == null || lastClose == null) { cdEl.style.display = 'none'; return; }
+    var y = null;
+    try { y = candles.priceToCoordinate(lastClose); } catch (e) { y = null; }
+    if (y == null) { cdEl.style.display = 'none'; return; }
+    var left = Math.max(0, Math.round(barCloseAt - (Date.now() / 1000)));
+    cdEl.textContent = fmtCountdown(left);
+    // Under the live price label rather than over it.
+    cdEl.style.top = Math.round(y + 9) + 'px';
+    // Warn in the last 10% of the bar, floored at 10s.
+    cdEl.className = left <= 10 ? 'closing' : '';
+    cdEl.style.display = 'block';
+  }
+  setInterval(drawCountdown, 1000);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(drawCountdown);
   function ensureStoch() {
     if (stochK) return;
     stochK = chart.addSeries(LWC.LineSeries, {
@@ -126,6 +171,32 @@
       var markers = d.markers || [];
       if (markersApi) markersApi.setMarkers(markers);
       else if (markers.length) markersApi = LWC.createSeriesMarkers(candles, markers);
+
+      // Running-signal levels. Removed and recreated every update so a
+      // ratcheting stop moves and a closed trade leaves nothing behind —
+      // price lines have no "update the whole set" API.
+      for (var p = 0; p < priceLines.length; p++) {
+        try { candles.removePriceLine(priceLines[p]); } catch (e) {}
+      }
+      priceLines = [];
+      var lines = d.priceLines || [];
+      for (var q = 0; q < lines.length; q++) {
+        var L = lines[q];
+        if (L == null || typeof L.price !== 'number' || !isFinite(L.price)) continue;
+        priceLines.push(candles.createPriceLine({
+          price: L.price,
+          color: L.color || '#E3B84C',
+          lineWidth: 1,
+          lineStyle: L.style === 0 ? LWC.LineStyle.Solid : LWC.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: L.title || ''
+        }));
+      }
+      barCloseAt = (typeof d.barCloseAt === 'number') ? d.barCloseAt : null;
+      var cs = d.candles || [];
+      lastClose = cs.length ? cs[cs.length - 1].close : null;
+      drawCountdown();
+
       if (fit) chart.timeScale().fitContent();
       return 'ok:' + (d.candles ? d.candles.length : 0);
     }
