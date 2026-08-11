@@ -124,10 +124,15 @@ class TradePlanEngine {
   /// [maxStopPips] in price.
   static const double maxStopDistance = maxStopPips * pipSize;
 
-  /// Conviction gate. Raised from 80/20 in v1.1.4: fewer setups, each with a
-  /// clearer edge. The goal is reaching the target, not issuing signals.
-  static const int defaultBullishThreshold = 85;
-  static const int defaultBearishThreshold = 15;
+  /// Conviction gate: long above 80, short below 20.
+  ///
+  /// Briefly 85/15 in v1.1.4, which starved the app of signals for no real
+  /// gain in quality — and disagreed with [TradePlan.isHighConviction], which
+  /// has always defined high conviction as 80/20. Safety comes from the risk
+  /// controls (stop ceiling, ATR reach, news blackout, trailing stop), not
+  /// from refusing to look at the market.
+  static const int defaultBullishThreshold = 80;
+  static const int defaultBearishThreshold = 20;
 
   /// TP1 must sit at least this many risk multiples beyond entry, so a plan
   /// never risks more than it aims to make, and the target is never so close

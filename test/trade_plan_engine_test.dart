@@ -260,6 +260,24 @@ void main() {
       expect(plan.stop, lessThanOrEqualTo(4070)); // 4020 + 50
     });
 
+    test('the issue gate agrees with TradePlan.isHighConviction', () {
+      // isHighConviction is conviction >= 60, i.e. score >= 80 or <= 20.
+      // v1.1.4 briefly gated at 85/15, so the engine could refuse a plan its
+      // own model called high conviction — and starved the app of signals.
+      expect(TradePlanEngine.defaultBullishThreshold, 80);
+      expect(TradePlanEngine.defaultBearishThreshold, 20);
+
+      final plan = TradePlanEngine.generate(
+        analysis: analysis,
+        candles: _dayTradeBars(close: 4020, swingLow: 4000),
+        levels: _distantLevels(4020),
+      );
+      if (plan != null) {
+        expect(plan.isHighConviction, isTrue,
+            reason: 'anything issued must read as high conviction');
+      }
+    });
+
     test('intraday timeframes through H1 are capped, swing ones are not', () {
       expect(TradePlanEngine.maxTpDistanceFor('M5'), 200);
       expect(TradePlanEngine.maxTpDistanceFor('M15'), 200);

@@ -133,9 +133,13 @@ draft release behind.
   `SignalController.historyLimit` raised 25 → **200** so this is a record
   rather than a recent-few list.
 - `ai/trade_plan_engine.dart` — turns a high-conviction score into a
-  concrete plan: LONG at score ≥ `defaultBullishThreshold` (**85**), SHORT at
-  ≤ `defaultBearishThreshold` (**15**), else null (no signal). Raised from
-  80/20 in v1.1.4 — fewer setups, each with a clearer edge. **All tuning
+  concrete plan: LONG at score ≥ `defaultBullishThreshold` (**80**), SHORT at
+  ≤ `defaultBearishThreshold` (**20**), else null (no signal). v1.1.4 briefly
+  used 85/15; **v1.1.5 put it back** — it starved the app of signals and
+  disagreed with `TradePlan.isHighConviction` (conviction ≥ 60 ⇔ score 80/20),
+  so the engine could refuse a plan its own model called high conviction. A
+  test pins the two together. Safety comes from the risk controls, not from
+  refusing to look at the market. **All tuning
   constants live here** (`minRewardRisk`, `trailRiskMultiple`, `maxStopPips`,
   `intradayMaxTpPips`); `PlanScout` and `TradePlanScreen` default to them
   rather than repeating literals.
