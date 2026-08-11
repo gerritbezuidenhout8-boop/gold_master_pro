@@ -22,9 +22,16 @@ class LocalAlertStore implements AlertStore {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     if (raw == null || raw.isEmpty) return [];
-    final list =
-        (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
-    return [for (final m in list) AlertRule.fromMap(m)];
+    try {
+      final list =
+          (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
+      return [for (final m in list) AlertRule.fromMap(m)];
+    } catch (_) {
+      // Never let a bad record block the app — see LocalSignalStore.load for
+      // why this catches Error as well as Exception (`byName` on an unknown
+      // AlertKind throws an ArgumentError, which is an Error).
+      return [];
+    }
   }
 
   @override

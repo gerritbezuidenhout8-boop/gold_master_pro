@@ -25,8 +25,14 @@ class LocalSignalStore implements SignalStore {
       final list =
           (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
       return [for (final m in list) TradeSignal.fromMap(m)];
-    } on Exception {
-      return []; // never let a bad record block the app
+    } catch (_) {
+      // Never let a bad record block the app. Deliberately catches Error as
+      // well as Exception: only malformed *JSON* throws a FormatException —
+      // a stored object instead of a list, or a record whose field has the
+      // wrong type, throws a TypeError, and an unknown enum name throws an
+      // ArgumentError. Both are Errors, so `on Exception` let the crash
+      // through and a single corrupt blob bricked every launch.
+      return [];
     }
   }
 

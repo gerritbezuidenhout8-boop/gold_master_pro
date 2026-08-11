@@ -26,8 +26,15 @@ class LocalJournalStore implements JournalStore {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     if (raw == null || raw.isEmpty) return [];
-    final list = (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
-    return [for (final m in list) JournalEntry.fromMap(m)];
+    try {
+      final list =
+          (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
+      return [for (final m in list) JournalEntry.fromMap(m)];
+    } catch (_) {
+      // Never let a bad record block the app — see LocalSignalStore.load for
+      // why this catches Error as well as Exception.
+      return [];
+    }
   }
 
   @override

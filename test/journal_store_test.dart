@@ -1,8 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gold_master_pro/models/journal_entry.dart';
 import 'package:gold_master_pro/services/journal_store.dart';
+
+const String _key = 'gmp-journal-v1';
+
+void _seed(String raw) => SharedPreferences.setMockInitialValues({_key: raw});
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -39,5 +45,44 @@ void main() {
     expect(back[0].id, 'a');
     expect(back[0].exitPrice, isNull);
     expect(back[1].pnl, 40);
+  });
+
+  group('a corrupt record never blocks the app', () {
+    // `load` had no try/catch at all, so a bad blob crashed the launch and
+    // there was no in-app way to clear it.
+
+    test('malformed JSON yields an empty list', () async {
+      _seed('}{');
+      expect(await LocalJournalStore().load(), isEmpty);
+    });
+
+    test('a stored object instead of a list yields an empty list', () async {
+      _seed('{"id":"a"}');
+      expect(await LocalJournalStore().load(), isEmpty);
+    });
+
+    test('an unknown direction yields an empty list', () async {
+      // `TradeDirection.values.byName` throws an ArgumentError — an Error.
+      _seed(jsonEncode([
+        {
+          'id': 'a',
+          'openedAt': '2026-07-21T08:00:00.000Z',
+          'direction': 'sideways',
+          'entryPrice': 4056.43,
+        }
+      ]));
+      expect(await LocalJournalStore().load(), isEmpty);
+    });
+
+    test('a missing entry price yields an empty list', () async {
+      _seed(jsonEncode([
+        {
+          'id': 'a',
+          'openedAt': '2026-07-21T08:00:00.000Z',
+          'direction': 'long',
+        }
+      ]));
+      expect(await LocalJournalStore().load(), isEmpty);
+    });
   });
 }

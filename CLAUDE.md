@@ -43,7 +43,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; **237 tests** (v1.1.4) |
+| `flutter analyze` / `flutter test` | keep both green; **277 tests** (v1.1.5) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -300,6 +300,18 @@ draft release behind.
   streams run even offstage. Whole-set recompute per tick froze the app
   once — stream updates are throttled to ~1 rebuild/sec (`_dirty` +
   periodic timer). Keep new per-tick work behind that throttle.
+- **Every `.load()` that parses stored JSON must `catch (_)`, not `on
+  Exception`.** Only malformed *JSON* throws a `FormatException`. A stored
+  object where a list is expected, a field of the wrong type, and
+  `Enum.values.byName` on an unknown name all throw **`Error`s**
+  (`TypeError`/`ArgumentError`), which `on Exception` lets straight through
+  — and since these run at launch, one corrupt prefs blob bricks every start
+  with no in-app way to clear it. This bit `news_guard._news()` in v1.1.4 and
+  was still live in all three stores (`signal_store`, `alert_store`,
+  `journal_store`) until v1.1.5. `test/{signal,alert,journal}_store_test.dart`
+  pin the real stores against each corruption shape — the rest of the suite
+  substitutes in-memory fakes, so without those files the parsing paths run
+  nowhere.
 - **Tests:** widget tests must swap `MarketData.instance`,
   `Watchlist.fetch`, `AlertsController.instance` (real sockets/timers
   fail the pending-timer invariant), pass `calendar:` to any `PlanScout`
