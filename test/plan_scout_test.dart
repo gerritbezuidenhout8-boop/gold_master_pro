@@ -130,6 +130,104 @@ void main() {
     expect(signals.signals, hasLength(2));
   });
 
+  group('settle', () {
+    test('closes a trade whose target was hit between price samples',
+        () async {
+      // The reported bug: price wicked through the target between two
+      // 4-second quote samples, so onPrice never saw it and the trade sat
+      // open. The move exists only in the bar's high.
+      final scout = PlanScout(
+        calendar: _noNews,
+        data: _Fake(bullishH1(), bullishD1()),
+        signals: signals,
+      );
+      final opened = await scout.scan(now: _t0);
+      expect(opened, isNotNull);
+
+      final plan = opened!.plan;
+      // A bar that reaches the target without any tick reporting it.
+      final bar = Candle(
+        time: _t0.add(const Duration(minutes: 5)),
+        open: plan.entry,
+        high: plan.tp1 + 1,
+        low: plan.entry - 0.5,
+        close: plan.entry,
+      );
+
+      final settled = await PlanScout(
+        calendar: _noNews,
+        data: _Fake([bar], bullishD1()),
+        signals: signals,
+      ).settle(now: _t0.add(const Duration(minutes: 10)));
+
+      expect(settled, isNotNull);
+      expect(settled!.outcome, SignalOutcome.takeProfit);
+      expect(settled.exitPrice, plan.tp1);
+      expect(signals.active, isNull, reason: 'the desk is free again');
+    });
+
+    test('re-checks on the tight settle interval, not the analysis one',
+        () async {
+      final scout = PlanScout(
+        calendar: _noNews,
+        data: _Fake(bullishH1(), bullishD1()),
+        signals: signals,
+      );
+      await scout.scan(now: _t0);
+      expect(signals.active, isNotNull);
+
+      final plan = signals.active!.plan;
+      Candle hit(DateTime t) => Candle(
+            time: t,
+            open: plan.entry,
+            high: plan.tp1,
+            low: plan.entry - 0.5,
+            close: plan.entry,
+          );
+
+      final settler = PlanScout(
+        calendar: _noNews,
+        data: _Fake([hit(_t0)], bullishD1()),
+        signals: signals,
+        settleInterval: const Duration(seconds: 10),
+      );
+
+      // First look settles nothing yet only because the trade opened at _t0;
+      // 12s later the bar check must already run — a minute would be far too
+      // long to wait for a target that has been touched.
+      expect(await settler.settle(now: _t0), isNotNull);
+      expect(signals.active, isNull);
+    });
+
+    test('does nothing when no trade is running', () async {
+      final scout = PlanScout(
+        calendar: _noNews,
+        data: _Fake(bullishH1(), bullishD1()),
+        signals: signals,
+      );
+      expect(await scout.settle(now: _t0), isNull);
+    });
+
+    test('a broken feed does not throw', () async {
+      final scout = PlanScout(
+        calendar: _noNews,
+        data: _Fake(bullishH1(), bullishD1()),
+        signals: signals,
+      );
+      await scout.scan(now: _t0);
+      expect(signals.active, isNotNull);
+
+      final broken = PlanScout(
+        calendar: _noNews,
+        data: _Broken(),
+        signals: signals,
+      );
+      expect(await broken.settle(now: _t0.add(const Duration(minutes: 10))),
+          isNull);
+      expect(signals.active, isNotNull, reason: 'still running, not lost');
+    });
+  });
+
   test('stands aside inside a high-impact news window', () async {
     // Same bullish fixture that issues a signal above — the only difference
     // is an NFP print 10 minutes away.

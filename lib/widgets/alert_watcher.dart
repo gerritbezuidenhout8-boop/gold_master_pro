@@ -61,6 +61,13 @@ class _AlertWatcherState extends State<AlertWatcher> {
       final closed = SignalController.instance.onPrice(q.price);
       if (closed != null) _announceClose(closed);
 
+      // Settle the running trade from the bars, for the same reason and on
+      // the same terms as onPrice above: resolution is state, so it is not
+      // gated by the Signal Alerts toggle. The quote is only sampled every
+      // few seconds, so a target touched between samples exists only in a
+      // bar's high/low and would otherwise never be seen.
+      unawaited(_settle());
+
       // Look for the next setup. Throttled inside the scout, and skipped
       // entirely when the user has Signal Alerts off.
       if (AppSettings.instance.scoreAlerts.value) unawaited(_hunt());
@@ -91,6 +98,12 @@ class _AlertWatcherState extends State<AlertWatcher> {
     if (settings.priceAlerts.value || settings.scoreAlerts.value) {
       unawaited(Notifications.instance.requestPermission());
     }
+  }
+
+  /// Settles a finished trade found in the bars and announces its close.
+  Future<void> _settle() async {
+    final closed = await _scout.settle();
+    if (closed != null && mounted) _announceClose(closed);
   }
 
   /// Runs one throttled analysis and announces a plan if one opened.

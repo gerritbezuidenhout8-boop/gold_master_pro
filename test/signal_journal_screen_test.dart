@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:gold_master_pro/ai/trade_plan_engine.dart';
 import 'package:gold_master_pro/core/theme/app_theme.dart';
+import 'package:gold_master_pro/models/candle.dart';
 import 'package:gold_master_pro/models/trade_signal.dart';
 import 'package:gold_master_pro/screens/signal_journal/signal_journal_screen.dart';
 import 'package:gold_master_pro/services/signal_store.dart';
@@ -76,6 +77,10 @@ void main() {
     expect(find.text('Entry'), findsOneWidget);
     expect(find.text('Exit'), findsOneWidget);
     expect(find.textContaining('1 closed'), findsOneWidget);
+    // One trade, taken at its target: the record must read exactly 1 win and
+    // no losses.
+    expect(find.textContaining('1W · 0L'), findsOneWidget);
+    expect(find.text('100%'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -111,6 +116,37 @@ void main() {
     expect(find.text('RUNNING'), findsOneWidget);
     expect(find.text('Exit'), findsNothing);
     expect(find.textContaining('no closed signals'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a target reached only in the bars still reads 1W · 0L',
+      (tester) async {
+    // The reported case end to end: no tick ever reported the touch, so the
+    // trade is settled from the bar's high by PlanScout.settle -> reconcile.
+    final c = SignalController.instance;
+    await c.load();
+    final plan = _plan();
+    await c.issue(plan, now: DateTime.utc(2026, 7, 24, 12));
+
+    final closed = c.reconcile([
+      Candle(
+        time: DateTime.utc(2026, 7, 24, 13),
+        open: plan.entry,
+        high: plan.tp1, // exact touch, nothing beyond
+        low: plan.entry - 1,
+        close: plan.entry,
+      ),
+    ]);
+    expect(closed, isNotNull);
+    expect(closed!.outcome, SignalOutcome.takeProfit);
+
+    await _pump(tester);
+
+    expect(find.text('TAKE PROFIT'), findsOneWidget);
+    expect(find.textContaining('1W · 0L'), findsOneWidget);
+    expect(find.text('100%'), findsOneWidget);
+    expect(find.text('RUNNING'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
   });

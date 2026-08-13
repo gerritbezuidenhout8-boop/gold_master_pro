@@ -167,6 +167,147 @@ void main() {
     });
   });
 
+  group('the bar the trade opened inside still counts', () {
+    // The reported trade: BUY 4391, stop 4359, target 4438. Gold ran to 4450
+    // and the signal never closed.
+    TradePlan reported() => TradePlan(
+          direction: TradeDirection.long,
+          score: 88,
+          confidence: 70,
+          entry: 4391,
+          entryLow: 4389,
+          entryHigh: 4393,
+          stop: 4359,
+          tp1: 4438,
+          tp2: 4470,
+          risk: 32,
+          rr1: 1.47,
+          rr2: 2.47,
+          validUntil: DateTime.utc(2026, 8, 12),
+          rationale: const ['test'],
+        );
+
+    // Issued at 10:20, i.e. twenty minutes into the 10:00 H1 bar.
+    TradeSignal reportedSignal() => TradeSignal(
+          id: 'r1',
+          plan: reported(),
+          openedAt: DateTime.utc(2026, 8, 11, 10, 20),
+        );
+
+    List<Candle> hourly() => [
+          // Earlier bar, entirely before entry: must stay ignored.
+          Candle(
+              time: DateTime.utc(2026, 8, 11, 9),
+              open: 4380,
+              high: 4500, // even a huge high here must not settle the trade
+              low: 4300,
+              close: 4391),
+          // The bar the trade opened inside — gold runs to 4450.
+          Candle(
+              time: DateTime.utc(2026, 8, 11, 10),
+              open: 4391,
+              high: 4450,
+              low: 4385,
+              close: 4442),
+        ];
+
+    test('closes at the target instead of running forever', () {
+      final r = SignalEngine.resolveFromCandles(reportedSignal(), hourly())!;
+      expect(r.outcome, SignalOutcome.takeProfit);
+      expect(r.exitPrice, 4438, reason: 'booked at the level, not 4450');
+      expect(r.at, DateTime.utc(2026, 8, 11, 10));
+    });
+
+    test('a bar wholly before entry is still ignored', () {
+      // Only the 09:00 bar, which ended before the trade opened.
+      final r = SignalEngine.resolveFromCandles(reportedSignal(), [
+        Candle(
+            time: DateTime.utc(2026, 8, 11, 9),
+            open: 4380,
+            high: 4500,
+            low: 4300,
+            close: 4391),
+        // A second bar establishes the 1h interval but does nothing itself.
+        Candle(
+            time: DateTime.utc(2026, 8, 11, 10),
+            open: 4391,
+            high: 4400,
+            low: 4385,
+            close: 4395),
+      ]);
+      expect(r, isNull);
+    });
+
+    test('a live tick through the target also closes at the level', () {
+      // If the app is running, the quote path must catch it too: at 4450 the
+      // 1.5R trail sits at 4402, so nothing stops it out first.
+      final s = reportedSignal().withPeak(4450);
+      expect(s.trailingStop, 4402);
+      final r = SignalEngine.resolve(s, 4450)!;
+      expect(r.outcome, SignalOutcome.takeProfit);
+      expect(r.exitPrice, 4438);
+    });
+
+    test('the interval is inferred from the series', () {
+      expect(SignalEngine.inferBarInterval(hourly()), const Duration(hours: 1));
+      expect(SignalEngine.inferBarInterval(const []), isNull);
+    });
+  });
+
+  group('the target is taken on touch', () {
+    test('a quote exactly at the target closes it', () {
+      final s = _trailSignal(); // tp1 4100
+      final r = SignalEngine.resolve(s, 4100)!;
+      expect(r.outcome, SignalOutcome.takeProfit);
+      expect(r.exitPrice, 4100);
+      // A hair below is still running.
+      expect(SignalEngine.resolve(s, 4099.99), isNull);
+    });
+
+    test('a bar whose high exactly reaches the target closes it', () {
+      final r = SignalEngine.resolveFromCandles(_trailSignal(), [
+        _c(DateTime.utc(2026, 7, 24, 13), 4100, 4050),
+      ])!;
+      expect(r.outcome, SignalOutcome.takeProfit);
+      expect(r.exitPrice, 4100);
+    });
+
+    test('short: touching the target from above closes it', () {
+      final s = _trailSignal(long: false); // tp1 3940
+      expect(SignalEngine.resolve(s, 3940)!.outcome, SignalOutcome.takeProfit);
+      expect(
+          SignalEngine.resolveFromCandles(s, [
+            _c(DateTime.utc(2026, 7, 24, 13), 4010, 3940),
+          ])!.outcome,
+          SignalOutcome.takeProfit);
+    });
+
+    test('where the candle closes is irrelevant — only the touch counts', () {
+      // Wick straight through the target and close well back below it. The
+      // target was reached, so the trade is taken there.
+      final r = SignalEngine.resolveFromCandles(_trailSignal(), [
+        Candle(
+          time: DateTime.utc(2026, 7, 24, 13),
+          open: 4025,
+          high: 4140, // through tp1 4100
+          low: 4020,
+          close: 4030, // closes nowhere near it
+        ),
+      ])!;
+      expect(r.outcome, SignalOutcome.takeProfit);
+      expect(r.exitPrice, 4100);
+    });
+
+    test('a bar touching both levels still counts as the stop', () {
+      // Deliberate and unchanged: intrabar order is unknowable, so the
+      // conservative reading stands rather than flattering the record.
+      final r = SignalEngine.resolveFromCandles(_trailSignal(), [
+        _c(DateTime.utc(2026, 7, 24, 13), 4100, 4000),
+      ])!;
+      expect(r.outcome, SignalOutcome.stopLoss);
+    });
+  });
+
   group('SignalEngine.resolve (live tick)', () {
     test('long: closes at take-profit, at the level', () {
       final r = SignalEngine.resolve(_signal(long: true), 4041)!;

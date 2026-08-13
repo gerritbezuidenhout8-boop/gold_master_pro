@@ -23,6 +23,7 @@ class PlanScout {
     this.data,
     this.signals,
     this.minInterval = const Duration(minutes: 1),
+    this.settleInterval = const Duration(seconds: 10),
     this.dailyCacheTtl = const Duration(minutes: 15),
     this.bullishThreshold = TradePlanEngine.defaultBullishThreshold,
     this.bearishThreshold = TradePlanEngine.defaultBearishThreshold,
@@ -41,6 +42,14 @@ class PlanScout {
   /// new candles, so recomputing on every tick would burn battery for nothing.
   final Duration minInterval;
 
+  /// Shortest gap between two settlement checks — much tighter than
+  /// [minInterval], because a target should be taken the moment it is
+  /// touched, and settling is one cheap fetch rather than a full analysis.
+  ///
+  /// 10 s matches the candle feed's own poll rate: checking faster than the
+  /// bars refresh cannot see anything new.
+  final Duration settleInterval;
+
   /// How long a daily-candle fetch is reused. Daily bars barely move
   /// intraday, so refetching them each scan is wasted bandwidth.
   final Duration dailyCacheTtl;
@@ -52,6 +61,7 @@ class PlanScout {
   SignalController get _controller => signals ?? SignalController.instance;
 
   DateTime? _lastScan;
+  DateTime? _lastSettle;
   List<Candle>? _cachedDaily;
   DateTime? _cachedDailyAt;
   List<EconomicEvent>? _cachedNews;
@@ -64,6 +74,39 @@ class PlanScout {
   /// Whether a scan would run right now rather than being throttled away.
   bool due(DateTime now) =>
       _lastScan == null || now.difference(_lastScan!) >= minInterval;
+
+  /// Settles the running trade against recent bars.
+  ///
+  /// The live quote is only sampled every few seconds, so a target touched
+  /// *between* samples is invisible to [SignalController.onPrice] — the move
+  /// only exists in the bar's high/low. Before this, the sole replay was on
+  /// the Trade Plan screen, so a trade that had reached its target could stay
+  /// open indefinitely until you happened to open that screen.
+  ///
+  /// Deliberately not gated by the Signal Alerts toggle: closing a trade is
+  /// state, not a notification.
+  Future<TradeSignal?> settle({DateTime? now}) async {
+    final at = (now ?? DateTime.now().toUtc()).toUtc();
+    if (_busy) return null;
+    final controller = _controller;
+    if (!controller.loaded) await controller.load();
+    if (controller.canIssue) return null; // nothing is running
+    final last = _lastSettle;
+    if (last != null && at.difference(last) < settleInterval) return null;
+
+    _busy = true;
+    try {
+      final h1 = await _market.fetchCandles('H1');
+      if (h1.isEmpty) return null;
+      return controller.reconcile(h1);
+    } catch (_) {
+      // Same contract as scan(): never throw inside a stream listener.
+      return null;
+    } finally {
+      _lastSettle = at;
+      _busy = false;
+    }
+  }
 
   /// Runs an analysis if one is due and nothing is already running.
   ///

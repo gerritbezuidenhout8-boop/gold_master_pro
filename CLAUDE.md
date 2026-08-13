@@ -43,7 +43,7 @@ signals as recommendations to trade.
 
 | | |
 |---|---|
-| `flutter analyze` / `flutter test` | keep both green; **237 tests** (v1.1.4) |
+| `flutter analyze` / `flutter test` | keep both green; **252 tests** (v1.1.6) |
 | `flutter build apk --release` | needs the three env vars above |
 | `flutter build web` | web preview build |
 | `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
@@ -283,6 +283,31 @@ draft release behind.
   signal resolution is deliberately **not** gated by the price-alerts
   toggle (it is state, not a notification). TP1 closes the trade; TP2 is
   displayed as an untracked runner.
+  **v1.1.6 — why a trade could hit its target and stay open.** The live quote
+  is sampled every ~4 s, so a target touched *between* samples exists only in
+  a bar's high/low and `onPrice` never sees it. The replay that catches it
+  (`reconcile`) was called from exactly one place — the Trade Plan screen —
+  and `PlanScout.scan` returned early, **before fetching candles**, whenever
+  a trade was running. So the one component running continuously off the
+  quote stream was blind precisely when settlement was needed, and a finished
+  trade sat open until you happened to open Trade Plan (or, after a restart,
+  forever). `PlanScout.settle()` now replays recent H1 bars against the
+  running trade, throttled on `minInterval`, and `AlertWatcher` calls it
+  **ungated by `scoreAlerts`** — same reasoning as `onPrice`. Keep it
+  ungated: putting settlement behind a *notification* toggle re-creates this.
+  **The deeper cause, same release:** `resolveFromCandles` skipped any bar
+  whose *open* preceded `openedAt` — but a candle's `time` **is** its open, so
+  a trade issued mid-bar discarded that entire bar, up to a full hour on H1.
+  v1.1.4's candle bucketing made it permanent: before, Yahoo's trailing live
+  point carried the current second and slipped past the filter; snapped to the
+  bar start it never does. Real case: BUY 4391 / target 4438, gold ran to 4450
+  inside the opening bar and the trade never closed. A bar now counts when its
+  **end** is after `openedAt` (`SignalEngine.inferBarInterval` derives the bar
+  length from the smallest positive gap, so weekend gaps don't inflate it;
+  with no interval to infer it falls back to the old open-time rule). The
+  trade-off — the containing bar's extreme may predate entry — is deliberate:
+  ignoring an hour of real post-entry action is far worse, and the
+  both-levels-counts-as-stop rule still refuses to flatter the record.
 - `services/journal_store.dart` / `alert_store.dart` / `app_settings.dart`
   — local-first via shared_preferences, swappable `.instance` seams.
   Firebase/cloud runbooks: `docs/firebase_setup.md`,
