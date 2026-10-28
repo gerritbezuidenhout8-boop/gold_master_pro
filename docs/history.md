@@ -1,0 +1,346 @@
+# Gold Master Pro — design history
+
+Full notes moved out of CLAUDE.md (unchanged) so they load only when needed.
+Read the section for an area before changing it.
+
+
+AI-assisted **gold (XAUUSD) trading-analysis** app — Flutter, zero-cost
+stack. Standalone project (no relation to any other repo on this machine).
+Owner: Gerrit Bezuidenhout; tester: Luan (luanrohm34@gmail.com).
+Distribution: GitHub Releases APK (sideload) from
+`gerritbezuidenhout8-boop/gold_master_pro`.
+
+Positioning rule: outputs are **education/analysis, not financial advice**
+— the disclaimer on Home and in test emails is deliberate; never frame
+signals as recommendations to trade.
+
+## Environment (this Windows PC)
+
+- **The repo lives at `C:\dev\gold_master_pro`** — alongside the toolchain,
+  deliberately *off* OneDrive. A second working copy exists under
+  `OneDrive\Documents\Claude\Claude coding projects\Gold master pro\` and is
+  a **stale duplicate, not a mirror**: it was already a commit behind. Work
+  there and you will diverge silently. OneDrive also syncs `build/` and
+  `.dart_tool/` for no benefit and can leave files as cloud placeholders
+  that Gradle reads as empty.
+- Flutter `C:\dev\flutter` (on PATH) · JDK `C:\dev\java\jdk-21.0.11+10`
+  (JAVA_HOME) · Android SDK `C:\dev\Android\Sdk` (ANDROID_HOME)
+- **Keep `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=true`** (user env
+  var): this network's DNS breaks Java's dual-stack resolver; Gradle and
+  sdkmanager fail without it.
+- `flutter build windows`, `pub get`/`pub add`, **and now `flutter analyze`**
+  hit "enable Developer Mode" (plugin symlinks). Since v1.1.2 this fires on
+  a plain `analyze` too, because `flutter_local_notifications` ships a
+  Windows implementation that pulls desktop plugin registration into every
+  resolve. **Android/web builds and tests are unaffected** — treat it as
+  noise unless targeting Windows desktop, and just re-run: once dependencies
+  resolve, `analyze` completes normally.
+- No `gh` CLI. Git pushes work via Git Credential Manager. Read CI results
+  from the public API instead:
+  `api.github.com/repos/<owner>/<repo>/commits/<sha>/check-runs`.
+- **Stale `.git/index.lock`:** if git reports "Another git process seems to
+  be running", check for a real one (`Get-CimInstance Win32_Process -Filter
+  "Name='git.exe'"`) before deleting the lock. A crashed git run on
+  2026-08-01 left a 0-byte lock that got copied into both working trees.
+
+## Commands
+
+| | |
+|---|---|
+| `flutter analyze` / `flutter test` | keep both green; **252 tests** (v1.1.6) |
+| `flutter build apk --release` | needs the three env vars above |
+| `flutter build web` | web preview build |
+| `dart run tool/prepare_logo.dart` | regenerate branding from source jpeg |
+| `dart run flutter_launcher_icons` | regenerate launcher icons |
+
+**Release = tag push:** bump `version:` in pubspec **and
+`AppConstants.appVersion`**, commit, push, then
+`git tag vX.Y.Z && git push origin vX.Y.Z` → `.github/workflows/release.yml`
+builds and attaches `app-release.apk` + `gmp-web.zip` (~6 min). Download
+URL pattern: `releases/download/vX.Y.Z/app-release.apk`. Verify via the
+public `releases/expanded_assets/<tag>` page. Deleting a tag turns its
+release into an unpublished draft. `deploy-web.yml` needs Pages enabled
+(currently not) and is therefore **`workflow_dispatch`-only since v1.1.2** —
+it no longer runs on push, because a permanently red check trains you to
+ignore red checks. Re-enable the push trigger when Pages is turned on.
+CI pins Flutter
+**3.44.7** — check new deps against that, not just against local Flutter.
+
+**Always run `flutter analyze && flutter test` before tagging.** Two
+workflows check this, but neither removes the need to run it locally:
+`ci.yml` (analyze + test + web build) guards pushes to `main`, and **since
+v1.1.2 `release.yml` runs analyze + test before it builds**, so a tag can no
+longer publish an APK from red code. The trap the local run still catches:
+a tag is normally pushed seconds after the commit, *before* `ci.yml`
+reports — so without checking locally you learn it was broken only from the
+failed release run, which costs a tag deletion that leaves an unpublished
+draft release behind.
+
+## Architecture (lib/)
+
+- `services/market_data.dart` — swappable `MarketData.instance` facade
+  (candles, candle stream, quote stream, XAU spot). `BinanceMarketData` =
+  PAXG/USD via keyless Binance REST + WebSocket, bundled snapshot fallback
+  in `assets/candles/`.
+- `services/spot_gold_data.dart` — **the live default** (set in `main()`):
+  candles from COMEX **GC=F futures** (Yahoo v8 chart API, keyless, needs
+  a Mozilla User-Agent; ~0.1% from spot; **no 4h interval → H4 aggregated
+  from H1** via `aggregateCandles`); ticker/alerts from **Swissquote**
+  public XAU/USD bbo (mid of first spread profile) with gold-api.com
+  fallback. **On web (Yahoo / Swissquote block CORS): candles fall back to
+  Binance PAXG, live quotes poll gold-api.com's real XAU spot** (v1.0.9).
+  **v1.1.0: `_alignToSpot()` rebases every candle series (GC=F or PAXG) by
+  `spot − lastClose` so the chart reads at true gold-api XAU spot levels;
+  `_spotOffset` is reused to shift streamed bars. gold-api has no OHLC, so a
+  proxy still supplies bar *shapes* — only levels are spot (shift-invariant
+  for RSI/MACD/StochRSI).** **v1.1.2 — the jumping-chart fix: never let two
+  vendors write one bar.** The ticker was Swissquote, the candle alignment
+  was gold-api, and `_spotOffset` was frozen at load, so the forming bar
+  flipped between two levels and painted red candles on green moves (open
+  from one source, close from the other). Now `_spotQuote()` is the single
+  spot source for **both** `quoteStream` and `_alignToSpot`; every tick
+  records `_lastSpot`; and `anchorCandleToSpot` (pure, tested) re-anchors
+  each streamed bar so its close lands on live spot with open/high/low
+  shifted by the same delta — level from spot, shape (and therefore colour)
+  from the proxy. ChartScreen mirrors this: `_applySpot()` re-runs after
+  every `mergeCandle`, so spot always wins for the live close. Yahoo
+  delisted `XAUUSD=X` — GC=F is the only gold symbol. Chart caption reads
+  `SpotGoldMarketData.candleSource`. True spot XAUUSD *candles* are
+  paid-only; this is the free ceiling.
+- `indicators/` — pure, tested Dart: `Smma`, `Rsi`/`StochRsi`/
+  `RsiDivergence` (pivot-based), `Macd` (EMA 12/26/9 → line/signal/
+  histogram), `Adx` + ±DI (Wilder, trend strength), `Atr` (Wilder),
+  `KeyLevels` (**UTC midnight days, weeks start Monday 00:00 UTC** — never
+  mix with NY-5pm), `Fibonacci.auto` (pivot strength 5, lookback 120),
+  `CandlestickDetector` (14 threshold patterns, geometric only). MACD/ADX
+  surface in the Analysis Momentum + Trend-Strength cards.
+- `ai/gold_master_engine.dart` — deterministic weighted rubric (5
+  components → score 0-100, bias at 60/40, confidence, clarity, template
+  narrative). No Flutter imports, no network. Any future LLM layer
+  narrates computed numbers, never invents them. `analyze()` takes
+  `intradayName`/`intradayWord` so it can run on any intraday TF (Analysis
+  screen runs it across M5/M15/M30/H1; Home keeps hourly defaults).
+- `ai/news_guard.dart` — pure news blackout, **v1.1.4**. `blocking()` returns
+  the soonest high-impact **USD** `EconomicEvent` within `quietBefore` (30
+  min) / `quietAfter` (15 min) of now; window edges count as blocked. Gold's
+  worst whipsaws are around NFP/CPI/FOMC and the technicals cannot price them
+  in, so `PlanScout` refuses to open a trade inside one. The calendar is
+  cached on the daily TTL and `_news()` **catches `Error` as well as
+  `Exception`** — the bundled-asset fallback throws an `Error` with no
+  Flutter binding, and the scout runs in a stream listener that must not die.
+  No calendar simply means no known event. Tests must pass
+  `calendar:` (see the test gotchas) or they hit the network.
+- `screens/signal_journal/` — **v1.1.4**, Home drawer. The full record: every
+  signal newest-first with entry/stop/target/exit, outcome pill, R, and a
+  win-rate summary. A running signal reads gold ("Running"), not green/red,
+  because nothing is decided yet; a trailed stop shows `original → trailed`.
+  `SignalController.historyLimit` raised 25 → **200** so this is a record
+  rather than a recent-few list.
+- `ai/trade_plan_engine.dart` — turns a high-conviction score into a
+  concrete plan: LONG at score ≥ `defaultBullishThreshold` (**80**), SHORT at
+  ≤ `defaultBearishThreshold` (**20**), else null (no signal). v1.1.4 briefly
+  used 85/15; **v1.1.5 put it back** — it starved the app of signals and
+  disagreed with `TradePlan.isHighConviction` (conviction ≥ 60 ⇔ score 80/20),
+  so the engine could refuse a plan its own model called high conviction. A
+  test pins the two together. Safety comes from the risk controls, not from
+  refusing to look at the market. **All tuning
+  constants live here** (`minRewardRisk`, `trailRiskMultiple`, `maxStopPips`,
+  `intradayMaxTpPips`); `PlanScout` and `TradePlanScreen` default to them
+  rather than repeating literals.
+  Entry near price, stop = recent swing ± buffer clamped to [0.8,3]×ATR
+  (`indicators/atr.dart`, Wilder) and then to a hard **`maxStopPips` = 500
+  pips ($50)** ceiling applied *last*, so a volatile session can never widen
+  risk past it (it can therefore override the 0.8×ATR floor — deliberate).
+  Note this caps loss **size**, not loss **frequency**: a tighter stop sits
+  closer to price and is hit more often. TP1/TP2 = nearest key levels beyond
+  entry, floored at **`minRewardRisk` = 1R** (never risk more than you aim to
+  make, and never a target too close to be worth taking) and then taking the
+  **furthest** level still inside `reachAtrMultiple` × ATR (2×) — the reach is
+  ATR-based because what counts as "realistically hit" depends entirely on how
+  much gold is moving. A nearer target leaves money on the table, a further
+  one is not hit. TP2 is the next level beyond TP1 within the hard cap.
+  **v1.1.4 —
+  day-trade reach cap:** on intraday timeframes
+  (`intradayTimeframes` = M1/M5/M15/M30/**H1**) a target may
+  not sit more than `intradayMaxTpPips` (2000 pips = **$200**, since XAUUSD
+  pips are `pipSize` $0.10) from entry — entry 4020 targets at most 4220.
+  Levels beyond the cap are filtered out *before* TP selection, so the plan
+  falls back to a reachable R-multiple target instead of aiming at the
+  all-time high; the R-multiple fallbacks are then clamped too, and TP2 is
+  held at or beyond TP1 so `rr2` is never below `rr1`. **H4/D1/W1 stay
+  exempt** — a swing can afford the distance. Pass `timeframe:` to
+  `generate()` (or `maxTpDistance:` to override); all three call sites do.
+  H1 was exempt when the cap shipped, which meant it changed nothing about
+  the signals actually received (the Trade Plan screen and `PlanScout` both
+  analyse H1) — don't reintroduce that. `screens/trade_plan/` renders it
+  (mockup screen 8); reached by tapping Home's AI Recommendation card.
+  Education/analysis only — disclaimer on the screen. **`generate()` is the
+  only entry point: the 80/20 gate is deliberate and flat is a valid state
+  — never add an always-directional variant (v1.1.0 shipped one, and it was
+  removed in v1.1.1 at the owner's request). Both the Trade Plan screen and
+  the Analysis "Trade Signal" card use it and show a "no high-conviction
+  signal" state in the middle.** `TradePlan` also carries
+  `conviction`/`convictionLabel`/`isHighConviction` and `toMap`/`fromMap`
+  (a signal persists its plan by value).
+- **Chart renderer:** Android = TradingView **Lightweight Charts v5.2.0**
+  (`assets/tv/` bundled standalone JS + chart.html; `widgets/chart_widget.dart`
+  WebView + `tvChartPayload` serializer; refit only on timeframe change;
+  StochRSI uses the v5 panes API). All other platforms fall back to
+  `widgets/gmp_chart.dart` + `widgets/indicators/` — k_chart_plus with
+  custom indicators (SMMA overlay, StochRSI subpane, divergence markers).
+  Custom indicators cache per-candle values in an **Expando keyed by
+  entity**, so the indicator instances MUST be the same objects in
+  `prepare()` (calc) and the widget (draw) — they're static on GmpChart.
+  **v1.1.4 — the sliver-candles fix: bucket every candle time.** Yahoo
+  appends the live quote as a final data point stamped with the *current
+  second* rather than the bar boundary, and `mergeCandle` appends whenever a
+  newer time arrives — so every 10 s poll grew a new thin bar instead of
+  filling out the forming one (M15 showed a dozen bars in 12 minutes).
+  `floorToTimeframe`/`bucketCandle`/`normalizeCandles` (pure, tested, in
+  `market_data.dart`) snap every candle to its bar start, in `fetchCandles`
+  **and** `candleStream`, on both the Yahoo and PAXG paths. W1 snaps to
+  Monday 00:00 UTC to match `KeyLevels`; D1 to UTC midnight; everything else
+  by epoch arithmetic. **Never emit a candle whose time is not a bar
+  boundary.** ChartScreen shows a per-timeframe **close countdown** in the
+  AppBar, driven by the existing 1 s throttle timer (it must tick whether or
+  not price moved). The running signal's entry / trailing stop / TP1 / TP2
+  are drawn as TradingView **price lines** (`signalPriceLines` →
+  `payload['priceLines']`, applied in `chart.html`): always present so a
+  closed trade clears its lines, removed-and-recreated each update because
+  price lines have no bulk-update API, and `ChartWidget` compares `signal`
+  identity in `didUpdateWidget` so a ratcheting stop redraws.
+  **v1.1.0: ChartScreen folds each live spot tick into the forming candle
+  (`_onSpot`, throttled); StochRSI value shows both on the `IndicatorBar`
+  and as an on-chart `#readout` overlay in chart.html.** Gotcha: the browser
+  caches `chart.html` — hard-refresh after editing it.
+- `screens/onboarding/` — one-time intro (3 slides), gated by
+  `AppSettings.onboardingComplete`; `main.dart` shows it before the shell.
+- `screens/about/` — About Gold Master Pro (Home drawer): positioning,
+  feature summary, credits and the not-financial-advice disclaimer. Credits
+  **Luan Rohm** as designer and maker via `AppConstants.author`. Version
+  text comes from `AppConstants.appVersion` — **bump it alongside
+  `version:` in pubspec** (a test asserts the format, not the value).
+- `services/economic_calendar.dart` + `screens/calendar/` — this-week
+  ForexFactory calendar (nfs.faireconomy.media weekly JSON, keyless; live
+  native, bundled `assets/calendar/ff_thisweek.json` snapshot on web/offline
+  — no CORS). Reached from the Home drawer.
+- `state/alerts_controller.dart` — app-wide singleton ChangeNotifier
+  (deliberately no Riverpod). `widgets/alert_watcher.dart` wraps the
+  shell, evaluates `AlertEngine.fires` crossings, one-shot until re-armed.
+- **Notifications (v1.1.2).** `services/notifications.dart` — swappable
+  `Notifications.instance` seam like `MarketData`: `NoopNotifications` is
+  the default (so tests and unconfigured platforms never touch a platform
+  channel), `main()` installs `LocalNotifications`
+  (`flutter_local_notifications`, Android/iOS/macOS/Windows), and
+  `RecordingNotifications` is the test double. Everything that fires posts
+  an OS notification **and** an in-app SnackBar. Android needs
+  `POST_NOTIFICATIONS` in the manifest plus **core library desugaring** in
+  `android/app/build.gradle.kts` — the plugin does not link without it.
+  Ids live in `GmpNotificationIds` so a newer notification of a kind
+  replaces the older one. **v1.1.3 — Android 13+ drops every notification
+  until `POST_NOTIFICATIONS` is granted *at runtime*; the manifest entry
+  alone does nothing.** The Settings toggles only prompt on an off→on
+  transition and both alert switches default to *on*, so a fresh install
+  never flipped one, never asked, and alerts silently went nowhere while
+  the in-app SnackBar still appeared — which made it look like they worked.
+  `AlertWatcher.initState` now calls `requestPermission()` whenever either
+  alert toggle is on. Keep that call: it is the only thing that asks on a
+  default install. Notification copy follows the positioning rule:
+  "setup detected … analysis only", never an instruction to trade.
+- **`state/plan_scout.dart` — why signals notify at all.** Before it, a
+  plan was only generated inside the Trade Plan screen's refresh, so a
+  score reaching 80 while you were anywhere else was silently missed.
+  The scout runs the same `GoldMasterEngine` → `TradePlanEngine` →
+  `SignalController.issue` chain off the live quote stream, throttled to
+  `minInterval` (1 min — the score only moves on new candles) with daily
+  candles cached for 15 min. Network-tolerant by design: it returns null
+  rather than throwing, because it runs inside a stream listener that must
+  not die. Gated by `AppSettings.scoreAlerts` ("Signal Alerts", default
+  on).
+- **Signal lifecycle — one trade at a time.** `state/signal_controller.dart`
+  (2nd ChangeNotifier singleton) owns it: `canIssue` is the gate, so a new
+  plan opens only when nothing is running, and the open trade closes *only*
+  at its take-profit or stop — no expiry, and re-analysing never replaces
+  it. `ai/signal_engine.dart` is the pure rule, applied two ways:
+  `resolve()` on a live tick and `resolveFromCandles()` replayed on launch
+  so a trade that completed while the app was shut still settles. Exits
+  book **at the level**; a bar touching **both** levels counts as the stop,
+  never flattering the record. **v1.1.4 — trailing stop.** `TradeSignal`
+  carries a `recordedPeak` water mark (read via `peak`, defaulting to entry
+  so pre-v1.1.4 stored signals still load) that only ever ratchets via
+  `withPeak`. `trailingStop` = the plan stop until price has advanced 1R,
+  then `peak ∓ risk`: entry 4020 / stop 4000 (1R = 20) gives stop 4020 at
+  price 4040 and 4040 at 4060. Past 1R the stop sits above entry, so a
+  pullback closes **in profit** — hence a third outcome
+  `SignalOutcome.trailingStop`, and `wins`/`losses` now count **realised
+  money** (`TradeSignal.isWin`) rather than which level was hit; the old
+  `SignalOutcomeLabel.isWin` is gone. In candle replay the stop is tested
+  against the trail as it stood *entering* the bar, so a bar's own new high
+  never gets credited with lifting the stop before price returned to it.
+  `SignalController.onPrice` persists the ratchet (`withPeak` returns the
+  same instance on a non-extreme tick, so quiet ticks never write), and
+  `reconcile` calls `SignalEngine.advanceOverCandles` so the trail resumes
+  after a restart instead of resetting to entry. `models/trade_signal.dart`
+  stores the plan **by value** so a closed signal keeps the levels it was
+  judged on. Persisted via `services/signal_store.dart`
+  (`gmp-signals-v1`). `AlertWatcher` feeds prices to both controllers —
+  signal resolution is deliberately **not** gated by the price-alerts
+  toggle (it is state, not a notification). TP1 closes the trade; TP2 is
+  displayed as an untracked runner.
+  **v1.1.6 — why a trade could hit its target and stay open.** The live quote
+  is sampled every ~4 s, so a target touched *between* samples exists only in
+  a bar's high/low and `onPrice` never sees it. The replay that catches it
+  (`reconcile`) was called from exactly one place — the Trade Plan screen —
+  and `PlanScout.scan` returned early, **before fetching candles**, whenever
+  a trade was running. So the one component running continuously off the
+  quote stream was blind precisely when settlement was needed, and a finished
+  trade sat open until you happened to open Trade Plan (or, after a restart,
+  forever). `PlanScout.settle()` now replays recent H1 bars against the
+  running trade, throttled on `minInterval`, and `AlertWatcher` calls it
+  **ungated by `scoreAlerts`** — same reasoning as `onPrice`. Keep it
+  ungated: putting settlement behind a *notification* toggle re-creates this.
+  **The deeper cause, same release:** `resolveFromCandles` skipped any bar
+  whose *open* preceded `openedAt` — but a candle's `time` **is** its open, so
+  a trade issued mid-bar discarded that entire bar, up to a full hour on H1.
+  v1.1.4's candle bucketing made it permanent: before, Yahoo's trailing live
+  point carried the current second and slipped past the filter; snapped to the
+  bar start it never does. Real case: BUY 4391 / target 4438, gold ran to 4450
+  inside the opening bar and the trade never closed. A bar now counts when its
+  **end** is after `openedAt` (`SignalEngine.inferBarInterval` derives the bar
+  length from the smallest positive gap, so weekend gaps don't inflate it;
+  with no interval to infer it falls back to the old open-time rule). The
+  trade-off — the containing bar's extreme may predate entry — is deliberate:
+  ignoring an hour of real post-entry action is far worse, and the
+  both-levels-counts-as-stop rule still refuses to flatter the record.
+- `services/journal_store.dart` / `alert_store.dart` / `app_settings.dart`
+  — local-first via shared_preferences, swappable `.instance` seams.
+  Firebase/cloud runbooks: `docs/firebase_setup.md`,
+  `docs/alerts_backend.md` (Cloudflare Worker skeleton). Open environment
+  traps (browser-pane screenshots, cross-origin request logging, stale
+  `chart.html`): `docs/known_issues.md`.
+- Theme `core/theme/app_theme.dart`: black `#0A0A0B` + gold `#E3B84C`
+  system; reusable `GmpCard`/`SectionLabel`/`GmpPill`/`StatTile`/
+  `GoldButton`/`ScoreGauge`. Branding assets `assets/branding/` from the
+  source jpeg via `tool/prepare_logo.dart`.
+
+## Hard-won gotchas
+
+- **Perf:** ChartScreen lives in the RootShell `IndexedStack`, so its
+  streams run even offstage. Whole-set recompute per tick froze the app
+  once — stream updates are throttled to ~1 rebuild/sec (`_dirty` +
+  periodic timer). Keep new per-tick work behind that throttle.
+- **Tests:** widget tests must swap `MarketData.instance`,
+  `Watchlist.fetch`, `AlertsController.instance` (real sockets/timers
+  fail the pending-timer invariant), pass `calendar:` to any `PlanScout`
+  (its default is the live weekly fetch, so an un-injected scout reaches the
+  network — and in a non-widget test the asset fallback throws), and set
+  `SharedPreferences.setMockInitialValues`. Dispose trees with
+  `pumpWidget(SizedBox())`. ListViews virtualize — `scrollUntilVisible`
+  before asserting below-fold. `SectionLabel`/`GmpPill` UPPERCASE their
+  text. The chart-screen throttle needs `pump(Duration(seconds: 1))`.
+- Markets tab auto-refreshes on `AppSettings.autoRefreshSeconds`
+  (**default 1 s** since v1.1.2, persisted) from gold-api.com (also
+  Silver/Copper/BTC/ETH). One refresh = **five parallel** keyless requests,
+  and `_load()` skips a tick while a round is in flight, so the real ceiling
+  is one round per round-trip. If gold-api starts 429ing, raise the interval
+  or batch the five symbols — don't lower the floor below 1 s.
